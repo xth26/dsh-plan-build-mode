@@ -1,0 +1,10 @@
+# Profile patch for dsh-plan-build-mode.
+# Loaded automatically when the package is installed in a DSH profile.
+- insert:
+    - id: plan-build-mode
+      name: 'dsh-plan-build-mode'
+      config:
+        planSandbox: read-only
+        buildSandbox: workspace-write
+        denyWriteTools: true
+        section: true
