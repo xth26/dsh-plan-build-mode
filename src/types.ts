@@ -6,7 +6,7 @@
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 
 declare module '@deepseek-ai/dsh-session/types' {
-  // This plugin reuses the existing 'plan/mode' event from @deepseek-ai/dsh-plan-mode
+  // This plugin reuses the existing 'sandbox/mode' event from @deepseek-ai/dsh-sandbox-policy
   // for persistence compatibility. No new session event types are added.
 }
 

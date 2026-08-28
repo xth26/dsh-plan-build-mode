@@ -62,6 +62,9 @@ export const Config = z.object({
 export function apply(ctx: Context, config: PlanBuildModeConfig = {}): void {
   const planSandbox = config.planSandbox ?? DEFAULT_PLAN_SANDBOX
   const buildSandbox = config.buildSandbox ?? DEFAULT_BUILD_SANDBOX
+  if (planSandbox === buildSandbox) {
+    throw new Error(`planSandbox and buildSandbox must be different, but both are '${planSandbox}'.`)
+  }
   const denyWriteTools = config.denyWriteTools !== false
   const enableSection = config.section !== false
 
@@ -118,15 +121,14 @@ export function apply(ctx: Context, config: PlanBuildModeConfig = {}): void {
             }
           }
 
-          const switchMatch = /^switch\s+(\S*)$/u.exec(arg)
-          if (switchMatch === null) {
+          if (!arg.startsWith('switch')) {
             return {
               kind: 'error',
               text: 'Usage: /plan-build, /plan-build switch, /plan-build switch plan, or /plan-build switch build.',
             }
           }
 
-          const target = switchMatch[1]!
+          const target = arg.slice('switch'.length).trim().toLowerCase()
           if (target === '') {
             const next = active ? 'build' : 'plan'
             setPlanBuildMode(agent, next, planSandbox, buildSandbox)

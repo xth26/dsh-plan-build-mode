@@ -1,5 +1,5 @@
 {
-  "name": "dsh-plan-build-mode",
+  "name": "@xth26/dsh-plan-build-mode",
   "description": "OpenCode-style Plan / Build hard permission model for DSH",
   "version": "0.1.0",
   "publishConfig": {
@@ -21,9 +21,7 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/index.js",
-    "lib/invariant.js",
-    "lib/types/**/*.d.ts",
+    "lib",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
@@ -53,16 +51,36 @@
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/cordis": { "optional": true },
-    "@deepseek-ai/dsh-agent": { "optional": true },
-    "@deepseek-ai/dsh-commands": { "optional": true },
-    "@deepseek-ai/dsh-invariants": { "optional": true },
-    "@deepseek-ai/dsh-sandbox": { "optional": true },
-    "@deepseek-ai/dsh-sandbox-policy": { "optional": true },
-    "@deepseek-ai/dsh-session": { "optional": true },
-    "@deepseek-ai/dsh-system-prompt": { "optional": true },
-    "@deepseek-ai/dsh-tools": { "optional": true },
-    "@deepseek-ai/schemastery": { "optional": true }
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-agent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-commands": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-invariants": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-sandbox": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-sandbox-policy": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-session": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-system-prompt": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "link:../deepseek-harness/vendor/cordis",
