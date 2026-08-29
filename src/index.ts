@@ -4,6 +4,8 @@
  * Implements an OpenCode-style Plan / Build mode that is independent from
  * DSH's built-in `/plan` soft-guidance mode:
  *
+ * - `/plan-build`             -> Toggle between Plan and Build modes
+ * - `/plan-build status`      -> Show the current mode
  * - `/plan-build switch plan`  -> Plan mode + read-only sandbox
  * - `/plan-build switch build` -> Build mode + workspace-write sandbox
  * - Blocks `write`/`edit` tool calls while in Plan mode
@@ -86,8 +88,8 @@ export function apply(ctx: Context, config: PlanBuildModeConfig = {}): void {
           const agent = (context as { agent?: { session: Session } }).agent
           if (agent === undefined) return ''
           return isPlanModeActive(agent.session.events, planSandbox)
-            ? 'You are in OpenCode Plan Mode. You are READ-ONLY. You may read files, search code, browse directories, and ask questions. You MUST NOT create, modify, or delete files; run commands that change the system; install packages; run tests/builds; or delegate to subagents/workflows. Present a complete plan and use /plan-build switch build before implementing.'
-            : 'You are in OpenCode Build Mode. You may edit files, run commands, and execute the approved plan. Make minimal changes, run tests/verification after changes, and ask for confirmation before destructive git operations or system-wide changes.'
+            ? 'You are in OpenCode Plan Mode. You are READ-ONLY. You may read files, search code, browse directories, ask questions, and inspect data or run quick read-only sanity checks. You are encouraged to write short command-line Python snippets (for example, python -B -c "...") to read data files, compute statistics, sample records, or run fast tests that do not modify the filesystem or write caches. Avoid commands that install packages, write files, generate build artifacts, or change the system. If a verification requires writing files, leave it for Build Mode. Present a complete plan and use /plan-build (or /plan-build switch build) to enter Build Mode before implementing.'
+            : 'You are in OpenCode Build Mode. You may edit files, run commands, and execute the approved plan. Make minimal changes, run tests/verification after changes, and ask for confirmation before destructive git operations or system-wide changes. Run /plan-build (or /plan-build switch plan) to return to Plan Mode when you need to re-plan.'
         },
       }))
     }
@@ -105,36 +107,38 @@ export function apply(ctx: Context, config: PlanBuildModeConfig = {}): void {
     ctx.inject(['commands'], (commandCtx) => {
       disposers.push(commandCtx.commands.register({
         name: 'plan-build',
-        description: 'Switch between OpenCode Plan and Build modes',
-        input: { hint: '[switch [plan|build]]' },
+        description: 'Toggle between OpenCode Plan and Build modes',
+        input: { hint: '[status | switch [plan|build]]' },
         handler: ({ agent, rawInput }: CommandInvocation): CommandResult => {
           const arg = rawInput.trim().toLowerCase()
-
           const active = isPlanModeActive(agent.session.events, planSandbox)
 
-          if (arg === '') {
+          if (arg === '' || arg === 'switch') {
+            const next = active ? 'build' : 'plan'
+            setPlanBuildMode(agent, next, planSandbox, buildSandbox)
+            return {
+              kind: 'success',
+              text: `Switched to ${next} mode. Run /plan-build again to switch back.`,
+            }
+          }
+
+          if (arg === 'status') {
             return {
               kind: 'success',
               text: active
-                ? 'Plan mode is active (read-only). Use /plan-build switch build to enter Build mode.'
-                : 'Build mode is active. Use /plan-build switch plan to enter Plan mode.',
+                ? 'Plan mode is active (read-only). Run /plan-build to enter Build mode, or /plan-build switch build.'
+                : 'Build mode is active. Run /plan-build to enter Plan mode, or /plan-build switch plan.',
             }
           }
 
           if (!arg.startsWith('switch')) {
             return {
               kind: 'error',
-              text: 'Usage: /plan-build, /plan-build switch, /plan-build switch plan, or /plan-build switch build.',
+              text: 'Usage: /plan-build (toggle), /plan-build status, or /plan-build switch [plan|build].',
             }
           }
 
           const target = arg.slice('switch'.length).trim().toLowerCase()
-          if (target === '') {
-            const next = active ? 'build' : 'plan'
-            setPlanBuildMode(agent, next, planSandbox, buildSandbox)
-            return { kind: 'success', text: `Switched to ${next} mode.` }
-          }
-
           if (target !== 'plan' && target !== 'build') {
             return {
               kind: 'error',

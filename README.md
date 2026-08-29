@@ -70,10 +70,11 @@ Then start DSH with that profile. The `dsh.bundle.patch` field in the plugin's
 
 | Command | Effect |
 |---|---|
-| `/plan-build` | Show the current mode |
+| `/plan-build` | Toggle between Plan and Build modes |
+| `/plan-build status` | Show the current mode |
 | `/plan-build switch plan` | Enter Plan mode (read-only) |
 | `/plan-build switch build` | Enter Build mode (writable) |
-| `/plan-build switch` | Toggle between plan and build |
+| `/plan-build switch` | Same as `/plan-build`; toggles between modes |
 
 ## Configuration
 
@@ -87,17 +88,28 @@ Then start DSH with that profile. The `dsh.bundle.patch` field in the plugin's
     section: true
 ```
 
+## Plan mode: command-line Python for inspection
+
+While Plan mode is read-only and blocks `write`/`edit` tools, it is **encouraged** to run short, read-only command-line Python snippets to inspect data and validate assumptions. For example:
+
+```bash
+python -B -c "import json, sys; data = json.load(open('data/sample.json')); print(len(data))"
+python -B -c "import pandas as pd; print(pd.read_csv('data.csv').describe())"
+pytest -p no:cacheprovider -q tests/test_sanity.py
+```
+
+Use `-B` (or set `PYTHONDONTWRITEBYTECODE=1`) and `pytest -p no:cacheprovider` to avoid writing `__pycache__` or `.pytest_cache`. The read-only sandbox is the final guardrail; any command that tries to write files will still be blocked at the sandbox layer.
+
 ## Local integration check
 
 After installing/linking the plugin in a DSH profile:
 
 1. Start DSH with that profile.
-2. Run `/plan-build switch plan`. You should see a confirmation that Plan mode
-   is active.
+2. Run `/plan-build` to enter Plan mode (read-only). You should see a confirmation.
 3. Ask the agent to call the `write` tool. It should be denied with a reason.
-4. Run `/plan-build switch build`. You should see a confirmation that Build mode
-   is active.
+4. Run `/plan-build` again to enter Build mode (writable). You should see a confirmation.
 5. Ask the agent to call `write` again. It should now be allowed.
+6. Run `/plan-build status` to check the current mode without switching.
 
 ## License
 

@@ -67,10 +67,11 @@ pnpm link --global @xth26/dsh-plan-build-mode
 
 | 命令 | 效果 |
 |---|---|
-| `/plan-build` | 显示当前模式 |
+| `/plan-build` | 在 Plan 与 Build 模式之间切换 |
+| `/plan-build status` | 显示当前模式 |
 | `/plan-build switch plan` | 进入 Plan 模式（只读） |
 | `/plan-build switch build` | 进入 Build 模式（可写） |
-| `/plan-build switch` | 切换当前模式 |
+| `/plan-build switch` | 同 `/plan-build`，切换当前模式 |
 
 ## 配置
 
@@ -84,15 +85,28 @@ pnpm link --global @xth26/dsh-plan-build-mode
     section: true
 ```
 
+## Plan 模式：命令行 Python 做数据检查
+
+Plan 模式只读并拦截 `write`/`edit` 工具，但**鼓励**在命令行里跑简短、只读的 Python 片段来读数据和验证假设。例如：
+
+```bash
+python -B -c "import json, sys; data = json.load(open('data/sample.json')); print(len(data))"
+python -B -c "import pandas as pd; print(pd.read_csv('data.csv').describe())"
+pytest -p no:cacheprovider -q tests/test_sanity.py
+```
+
+使用 `-B`（或设置 `PYTHONDONTWRITEBYTECODE=1`）以及 `pytest -p no:cacheprovider`，避免写入 `__pycache__` 或 `.pytest_cache`。read-only 沙箱仍是最终防线，任何试图写文件的命令仍会在沙箱层被拒绝。
+
 ## 本地集成验证
 
 安装或 link 插件到 DSH profile 后：
 
 1. 启动 DSH。
-2. 输入 `/plan-build switch plan`，应提示进入 Plan 模式。
+2. 输入 `/plan-build`，应提示进入 Plan 模式。
 3. 让 agent 调用 `write` 工具，应被拒绝。
-4. 输入 `/plan-build switch build`，应提示进入 Build 模式。
+4. 再次输入 `/plan-build`，应提示进入 Build 模式。
 5. 再次让 agent 调用 `write`，应允许执行。
+6. 输入 `/plan-build status`，可只查看当前模式而不切换。
 
 ## 许可证
 

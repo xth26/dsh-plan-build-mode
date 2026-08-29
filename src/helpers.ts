@@ -68,7 +68,7 @@ export function planModeDenial(
   if (planSandbox !== 'read-only') return undefined
   if (!isPlanModeActive(exec.agent.session.events, planSandbox)) return undefined
   if (writeTools.has(exec.name)) {
-    return `Tool '${exec.name}' is forbidden in Plan Mode. Leave Plan Mode with /plan-build switch build before editing files.`
+    return `Tool '${exec.name}' is forbidden in Plan Mode. Run /plan-build (or /plan-build switch build) to leave Plan Mode before editing files.`
   }
   return undefined
 }

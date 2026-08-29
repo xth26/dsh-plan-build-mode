@@ -102,12 +102,15 @@ describe('apply', () => {
     )
   })
 
-  it('shows Build mode by default', () => {
+  it('toggles to Plan mode with bare /plan-build', () => {
     const ctx = setupCtx()
     apply(ctx as any, {})
-    const result = invokeCommand(ctx, '')
+    const events: Session['events'] = []
+    const result = invokeCommand(ctx, '', events)
     expect(result.kind).toBe('success')
-    expect(result.text).toContain('Build mode is active')
+    expect(result.text).toContain('Switched to plan mode.')
+    expect(result.text).toContain('Run /plan-build again to switch back.')
+    expect(events[0]).toMatchObject({ type: 'sandbox/mode', data: { mode: 'read-only' } })
   })
 
   it('toggles to Plan mode with /plan-build switch', () => {
@@ -116,8 +119,40 @@ describe('apply', () => {
     const events: Session['events'] = []
     const result = invokeCommand(ctx, 'switch', events)
     expect(result.kind).toBe('success')
-    expect(result.text).toBe('Switched to plan mode.')
+    expect(result.text).toContain('Switched to plan mode.')
+    expect(result.text).toContain('Run /plan-build again to switch back.')
     expect(events[0]).toMatchObject({ type: 'sandbox/mode', data: { mode: 'read-only' } })
+  })
+
+  it('reports status in Plan mode', () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const events: Session['events'] = [{ type: 'sandbox/mode', data: { mode: 'read-only' }, seq: 1, time: 0 } as any]
+    const result = invokeCommand(ctx, 'status', events)
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('Plan mode is active')
+    expect(result.text).not.toContain('Switched')
+  })
+
+  it('reports status in Build mode', () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const events: Session['events'] = [{ type: 'sandbox/mode', data: { mode: 'workspace-write' }, seq: 1, time: 0 } as any]
+    const result = invokeCommand(ctx, 'status', events)
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('Build mode is active')
+    expect(result.text).not.toContain('Switched')
+  })
+
+  it('toggles back to Build mode with bare /plan-build', () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const events: Session['events'] = [{ type: 'sandbox/mode', data: { mode: 'read-only' }, seq: 1, time: 0 } as any]
+    const result = invokeCommand(ctx, '', events)
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('Switched to build mode.')
+    expect(result.text).toContain('Run /plan-build again to switch back.')
+    expect(events[1]).toMatchObject({ type: 'sandbox/mode', data: { mode: 'workspace-write' } })
   })
 
   it('switches to Plan mode explicitly', () => {
@@ -154,7 +189,7 @@ describe('apply', () => {
     apply(ctx as any, {})
     const result = invokeCommand(ctx, 'foobar')
     expect(result.kind).toBe('error')
-    expect(result.text).toContain('Usage')
+    expect(result.text).toContain('Usage: /plan-build (toggle)')
   })
 
   it('system prompt section describes Plan mode', () => {
@@ -162,7 +197,10 @@ describe('apply', () => {
     apply(ctx as any, {})
     const text = getSystemPromptText(ctx)
     const agent = makeAgent([{ type: 'sandbox/mode', data: { mode: 'read-only' }, seq: 1, time: 0 } as any])
-    expect(text({ agent } as AssembleContext)).toContain('You are in OpenCode Plan Mode')
+    const prompt = text({ agent } as AssembleContext)
+    expect(prompt).toContain('You are in OpenCode Plan Mode')
+    expect(prompt).toContain('python -B')
+    expect(prompt).toContain('read data files')
   })
 
   it('system prompt section describes Build mode', () => {
@@ -170,7 +208,10 @@ describe('apply', () => {
     apply(ctx as any, {})
     const text = getSystemPromptText(ctx)
     const agent = makeAgent([{ type: 'sandbox/mode', data: { mode: 'workspace-write' }, seq: 1, time: 0 } as any])
-    expect(text({ agent } as AssembleContext)).toContain('You are in OpenCode Build Mode')
+    const prompt = text({ agent } as AssembleContext)
+    expect(prompt).toContain('You are in OpenCode Build Mode')
+    expect(prompt).toContain('/plan-build')
+    expect(prompt).toContain('Plan Mode')
   })
 
   it('system prompt section is empty when agent is undefined', () => {
