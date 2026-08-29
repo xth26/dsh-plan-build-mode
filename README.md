@@ -66,6 +66,27 @@ pnpm link --global @xth26/dsh-plan-build-mode
 Then start DSH with that profile. The `dsh.bundle.patch` field in the plugin's
 `package.json` makes the patch apply automatically.
 
+## Updating
+
+For `0.x` versions, the semver range `^0.1.0` only matches `0.1.x` and will **never** auto-update to `0.2.0`. Always bump the declaration explicitly and restart the DSH process:
+
+```bash
+# Bump the installed version in the target profile
+# (run this outside a sandboxed agent session; the profile directory is not writable from DSH)
+dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@0.2.0
+
+# Restart the DSH process that uses that profile
+# (old Node process still holds the previous plugin code in memory)
+Stop-Process -Name dsh -Force   # PowerShell
+# or: taskkill /IM dsh.exe /F   # CMD
+```
+
+Then start `dsh web` or `dsh tui` again. To always pull the latest published version:
+
+```bash
+dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
+```
+
 ## Usage
 
 | Command | Effect |

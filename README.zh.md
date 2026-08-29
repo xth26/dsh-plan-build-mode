@@ -63,6 +63,27 @@ pnpm link --global @xth26/dsh-plan-build-mode
 
 然后启动 DSH。插件 `package.json` 里的 `dsh.bundle.patch` 会自动生效。
 
+## 更新
+
+对于 `0.x` 版本，semver 范围 `^0.1.0` 只会匹配 `0.1.x`，**永远不会**自动更新到 `0.2.0`。升级时必须显式提升声明并重启 DSH 进程：
+
+```bash
+# 在目标 profile 中提升已安装版本
+# （这条命令需要在非沙箱的终端里执行；DSH agent 无法写入 profile 目录）
+dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@0.2.0
+
+# 重启使用该 profile 的 DSH 进程
+# （旧的 Node 进程仍缓存着旧插件代码）
+Stop-Process -Name dsh -Force   # PowerShell
+# 或: taskkill /IM dsh.exe /F   # CMD
+```
+
+然后重新启动 `dsh web` 或 `dsh tui`。如果想始终安装最新发布版本：
+
+```bash
+dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
+```
+
 ## 使用
 
 | 命令 | 效果 |
