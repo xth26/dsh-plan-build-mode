@@ -70,7 +70,7 @@ pnpm link --global @xth26/dsh-plan-build-mode
 ```bash
 # 在目标 profile 中提升已安装版本
 # （这条命令需要在非沙箱的终端里执行；DSH agent 无法写入 profile 目录）
-dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@0.2.0
+dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@0.2.2
 
 # 重启使用该 profile 的 DSH 进程
 # （旧的 Node 进程仍缓存着旧插件代码）
@@ -86,13 +86,14 @@ dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
 
 ## 使用
 
-| 命令 | 效果 |
+| 命令 / 快捷键 | 效果 |
 |---|---|
 | `/plan-build` | 在 Plan 与 Build 模式之间切换 |
 | `/plan-build status` | 显示当前模式 |
 | `/plan-build switch plan` | 进入 Plan 模式（只读） |
 | `/plan-build switch build` | 进入 Build 模式（可写） |
 | `/plan-build switch` | 同 `/plan-build`，切换当前模式 |
+| `ctrl+shift+b`（仅 dsh-tui） | 在 Plan 与 Build 模式之间切换；可通过 `tuiShortcut` 配置 |
 
 ## 配置
 
@@ -104,7 +105,10 @@ dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
     buildSandbox: workspace-write
     denyWriteTools: true
     section: true
+    tuiShortcut: ctrl+shift+b
 ```
+
+`planSandbox` 和 `buildSandbox` 必须不同。`tuiShortcut` 对 `dsh web` 无效；留空字符串可禁用 dsh-tui 的快捷键。
 
 ## Plan 模式：命令行 Python 做数据检查
 

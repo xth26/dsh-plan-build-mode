@@ -34,4 +34,12 @@ export interface PlanBuildModeConfig {
    * @default true
    */
   section?: boolean
+  /**
+   * Optional TUI keyboard shortcut combo (e.g. `ctrl+shift+b`) that toggles
+   * Plan/Build mode when `dsh-tui` is loaded. Set to an empty string to
+   * disable. Bare keys are not allowed; the combo must include `ctrl` or
+   * `alt`. This shortcut is ignored by `dsh web`.
+   * @default 'ctrl+shift+b'
+   */
+  tuiShortcut?: string
 }

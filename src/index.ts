@@ -54,6 +54,7 @@ export const Config = z.object({
   ]).required(false),
   denyWriteTools: z.boolean().default(true),
   section: z.boolean().default(true),
+  tuiShortcut: z.string().default('ctrl+shift+b'),
 })
 
 /**
@@ -69,6 +70,7 @@ export function apply(ctx: Context, config: PlanBuildModeConfig = {}): void {
   }
   const denyWriteTools = config.denyWriteTools !== false
   const enableSection = config.section !== false
+  const tuiShortcut = config.tuiShortcut ?? 'ctrl+shift+b'
 
   ctx.effect(() => {
     const disposers: (() => void)[] = []
@@ -156,6 +158,42 @@ export function apply(ctx: Context, config: PlanBuildModeConfig = {}): void {
         },
       }))
     })
+
+    // TUI-only keyboard shortcut that toggles Plan/Build mode. It is ignored
+    // by `dsh web`; it only registers when dsh-tui's shortcut registry is
+    // composed, and it skips registration when the configured combo is blank.
+    if (tuiShortcut.trim() !== '') {
+      const tuiShortcuts = ctx.get('tuiShortcuts') as
+        | { register(combo: string, options: { description: string; handler: () => void | Promise<void> }, identity?: unknown): () => void }
+        | undefined
+      if (tuiShortcuts !== undefined) {
+        const disposeShortcut = tuiShortcuts.register(
+          tuiShortcut,
+          {
+            description: 'Toggle OpenCode Plan/Build mode',
+            handler() {
+              const agent = ctx.agents.currentInitiator()
+              if (agent === undefined) return
+              const active = isPlanModeActive(agent.session.events, planSandbox)
+              const next = active ? 'build' : 'plan'
+              setPlanBuildMode(agent, next, planSandbox, buildSandbox)
+              // Best-effort echo the same confirmation the slash command shows.
+              const commands = ctx.get('commands') as
+                | { execute(agent: unknown, line: string, images: readonly unknown[], signal: AbortSignal): Promise<unknown> }
+                | undefined
+              if (commands !== undefined) {
+                const signal = new AbortController().signal
+                Promise.resolve()
+                  .then(() => commands.execute(agent, '/plan-build status', [], signal))
+                  .catch(() => { /* ignore: command output is best-effort feedback */ })
+              }
+            },
+          },
+          ctx,
+        )
+        disposers.push(disposeShortcut)
+      }
+    }
 
     return () => {
       for (const dispose of disposers) dispose()
