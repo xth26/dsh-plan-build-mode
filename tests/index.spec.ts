@@ -47,8 +47,7 @@ function setupCtx(): MockCtx & { agents: { list: ReturnType<typeof vi.fn> } } {
     systemPrompt,
     on,
     inject,
-    agents: { list: vi.fn(() => []), currentInitiator: vi.fn(() => undefined) },
-    get: vi.fn(() => undefined),
+    agents: { list: vi.fn(() => []) },
   }
   return ctx as any
 }
@@ -220,70 +219,6 @@ describe('apply', () => {
     apply(ctx as any, {})
     const text = getSystemPromptText(ctx)
     expect(text({} as AssembleContext)).toBe('')
-  })
-})
-
-describe('tui shortcut', () => {
-  function makeShortcutCtx() {
-    const ctx = setupCtx()
-    const agent = makeAgent()
-    ctx.agents.currentInitiator = vi.fn(() => agent)
-    const shortcutRegister = vi.fn((_combo: string, options: { description: string; handler: () => void }) => {
-      return () => {}
-    })
-    const execute = vi.fn((_agent: unknown, line: string) => Promise.resolve(undefined))
-    ctx.get = vi.fn((name: string) => {
-      if (name === 'tuiShortcuts') return { register: shortcutRegister }
-      if (name === 'commands') return { execute }
-      return undefined
-    })
-    return { ctx, agent, shortcutRegister, execute }
-  }
-
-  it('registers the default TUI shortcut when tuiShortcuts is available', () => {
-    const { ctx, shortcutRegister } = makeShortcutCtx()
-    apply(ctx as any, {})
-    expect(shortcutRegister).toHaveBeenCalledWith(
-      'ctrl+shift+b',
-      expect.objectContaining({ description: 'Toggle OpenCode Plan/Build mode' }),
-      ctx,
-    )
-  })
-
-  it('does not register a shortcut when tuiShortcut is empty', () => {
-    const { ctx, shortcutRegister } = makeShortcutCtx()
-    apply(ctx as any, { tuiShortcut: '' })
-    expect(shortcutRegister).not.toHaveBeenCalled()
-  })
-
-  it('does not register a shortcut when tuiShortcuts service is absent', () => {
-    const ctx = setupCtx()
-    apply(ctx as any, {})
-    expect(ctx.get).toHaveBeenCalledWith('tuiShortcuts')
-  })
-
-  it('toggles mode via the shortcut handler', () => {
-    const { ctx, agent, shortcutRegister } = makeShortcutCtx()
-    apply(ctx as any, {})
-    let handler: (() => void) | undefined
-    shortcutRegister.mock.calls.forEach((call) => {
-      handler = call[1].handler
-    })
-    expect(handler).toBeDefined()
-    handler!()
-    expect(agent.session.events[0]).toMatchObject({ type: 'sandbox/mode', data: { mode: 'read-only' } })
-  })
-
-  it('echoes status via the commands service after shortcut toggle', async () => {
-    const { ctx, agent, shortcutRegister, execute } = makeShortcutCtx()
-    apply(ctx as any, {})
-    let handler: (() => void) | undefined
-    shortcutRegister.mock.calls.forEach((call) => {
-      handler = call[1].handler
-    })
-    handler!()
-    await Promise.resolve()
-    expect(execute).toHaveBeenCalledWith(agent, '/plan-build status', [], expect.any(AbortSignal))
   })
 })
 

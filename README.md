@@ -73,7 +73,7 @@ For `0.x` versions, the semver range `^0.1.0` only matches `0.1.x` and will **ne
 ```bash
 # Bump the installed version in the target profile
 # (run this outside a sandboxed agent session; the profile directory is not writable from DSH)
-dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@0.2.2
+dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@0.2.3
 
 # Restart the DSH process that uses that profile
 # (old Node process still holds the previous plugin code in memory)
@@ -89,14 +89,13 @@ dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
 
 ## Usage
 
-| Command / Gesture | Effect |
+| Command | Effect |
 |---|---|
 | `/plan-build` | Toggle between Plan and Build modes |
 | `/plan-build status` | Show the current mode |
 | `/plan-build switch plan` | Enter Plan mode (read-only) |
 | `/plan-build switch build` | Enter Build mode (writable) |
 | `/plan-build switch` | Same as `/plan-build`; toggles between modes |
-| `ctrl+shift+b` (dsh-tui only) | Toggle between Plan and Build modes; configurable via `tuiShortcut` |
 
 ## Configuration
 
@@ -108,10 +107,9 @@ dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
     buildSandbox: workspace-write
     denyWriteTools: true
     section: true
-    tuiShortcut: ctrl+shift+b
 ```
 
-`planSandbox` and `buildSandbox` must differ. `tuiShortcut` is ignored by `dsh web`; set it to an empty string to disable the TUI shortcut.
+`planSandbox` and `buildSandbox` must differ.
 
 ## Plan mode: command-line Python for inspection
 
