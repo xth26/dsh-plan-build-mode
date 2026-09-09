@@ -34,12 +34,4 @@ export interface PlanBuildModeConfig {
    * @default true
    */
   section?: boolean
-  /**
-   * Keyboard shortcut(s) that toggle between Plan and Build modes in clients
-   * exposing a shortcut seam. dsh-tui binds them through `ctx.tuiShortcuts`;
-   * the web client binds the same combos through its global keydown listener.
-   * Combos use the `ctrl+alt+shift+p` grammar (ctrl or alt required).
-   * @default ['ctrl+alt+shift+p']
-   */
-  shortcut?: string | readonly string[]
 }

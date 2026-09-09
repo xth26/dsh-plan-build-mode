@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import { apply } from '../src/index.ts'
-import { DEFAULT_SHORTCUT } from '../src/helpers.ts'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 import type { Session } from '@deepseek-ai/dsh-session'
@@ -24,44 +23,17 @@ interface MockCtx {
   systemPrompt: { section: ReturnType<typeof vi.fn> }
   on: ReturnType<typeof vi.fn>
   inject: ReturnType<typeof vi.fn>
-  logger: { warn: ReturnType<typeof vi.fn> }
 }
 
-interface SetupOptions {
-  /** Fake ctx.tuiShortcuts registry; omitted simulates a web/headless composition. */
-  tuiShortcuts?: { register: ReturnType<typeof vi.fn> }
-  /** Agents ctx.agents.list() returns; defaults to []. */
-  agents?: unknown[]
-  /** The fake command service's execute spy; defaults to a fresh vi.fn. */
-  commandsExecute?: ReturnType<typeof vi.fn>
-}
-
-function setupCtx(options: SetupOptions = {}): MockCtx & {
-  agents: { list: ReturnType<typeof vi.fn> }
-  _commandCtx: {
-    commands: { register: ReturnType<typeof vi.fn>; execute: ReturnType<typeof vi.fn> }
-    inject: ReturnType<typeof vi.fn>
-  }
-} {
+function setupCtx(): MockCtx & { agents: { list: ReturnType<typeof vi.fn> } } {
   const disposers: (() => void)[] = []
   const systemPrompt = { section: vi.fn() }
   const on = vi.fn((_event, handler) => {
     disposers.push(() => {})
     return () => {}
   })
-  const commandsExecute = options.commandsExecute ?? vi.fn()
-  const commandCtx = {
-    commands: { register: vi.fn(), execute: commandsExecute },
-    inject: vi.fn((services: string[], innerCb: (tuiCtx: unknown) => void) => {
-      if (services.includes('tuiShortcuts')) {
-        innerCb({
-          get: (svc: string) => (svc === 'tuiShortcuts' ? options.tuiShortcuts : undefined),
-        })
-      }
-      return undefined
-    }),
-  }
   const inject = vi.fn((_services, cb) => {
+    const commandCtx = { commands: { register: vi.fn() } }
     cb(commandCtx)
   })
   const ctx = {
@@ -75,13 +47,15 @@ function setupCtx(options: SetupOptions = {}): MockCtx & {
     systemPrompt,
     on,
     inject,
-    agents: { list: vi.fn(() => options.agents ?? []) },
-    logger: { warn: vi.fn() },
+    agents: { list: vi.fn(() => []) },
   }
-  return Object.assign(ctx as any, { _commandCtx: commandCtx })
+  return ctx as any
 }
 
 function invokeCommand(ctx: MockCtx, rawInput: string, events: Session['events'] = []): CommandResult {
+  const command = ctx.inject.mock.calls[0][1]({ commands: { register: vi.fn() } })
+  // The inject callback receives a context with commands.register; capture the registered definition.
+  // We re-run a fresh inject to grab the registered handler.
   let handler: ((invocation: CommandInvocation) => CommandResult) | undefined
   const captureCtx = {
     commands: {
@@ -89,7 +63,6 @@ function invokeCommand(ctx: MockCtx, rawInput: string, events: Session['events']
         handler = def.handler
       },
     },
-    inject: () => undefined,
   }
   ctx.inject.mock.calls[0][1](captureCtx)
   return handler!({ agent: makeAgent(events), rawInput } as CommandInvocation)
@@ -280,65 +253,5 @@ describe('tools/pre-execute', () => {
     const result = await listener(makeToolExecution('write', agent), next)
     expect(next).toHaveBeenCalled()
     expect(result).toMatchObject({ kind: 'allow' })
-  })
-})
-
-describe('tuiShortcuts', () => {
-  it('reaches the tuiShortcuts seam but binds nothing in web/headless compositions', () => {
-    const ctx = setupCtx()
-    apply(ctx as any, {})
-    expect(ctx._commandCtx.inject).toHaveBeenCalledWith(['tuiShortcuts'], expect.any(Function))
-  })
-
-  it('registers the default combo against ctx.tuiShortcuts', () => {
-    const register = vi.fn()
-    const ctx = setupCtx({ tuiShortcuts: { register } })
-    apply(ctx as any, {})
-    expect(register).toHaveBeenCalledWith(
-      DEFAULT_SHORTCUT,
-      expect.objectContaining({ description: expect.stringContaining('Plan and Build') }),
-      expect.anything(),
-    )
-  })
-
-  it('honours a configured string shortcut', () => {
-    const register = vi.fn()
-    const ctx = setupCtx({ tuiShortcuts: { register } })
-    apply(ctx as any, { shortcut: 'alt+p' })
-    expect(register).toHaveBeenCalledWith('alt+p', expect.any(Object), expect.anything())
-  })
-
-  it('registers every combo of a configured array', () => {
-    const register = vi.fn()
-    const ctx = setupCtx({ tuiShortcuts: { register } })
-    apply(ctx as any, { shortcut: ['alt+p', 'ctrl+shift+k'] })
-    expect(register).toHaveBeenCalledTimes(2)
-    expect(register).toHaveBeenCalledWith('alt+p', expect.any(Object), expect.anything())
-    expect(register).toHaveBeenCalledWith('ctrl+shift+k', expect.any(Object), expect.anything())
-  })
-
-  it('runs /plan-build through the command service when the shortcut fires', async () => {
-    const register = vi.fn()
-    const commandsExecute = vi.fn(async () => ({ kind: 'success', text: 'Switched to plan mode.' }))
-    const ctx = setupCtx({ tuiShortcuts: { register }, commandsExecute, agents: [makeAgent()] })
-    apply(ctx as any, {})
-    const handler = register.mock.calls[0][1].handler as () => Promise<void>
-    await handler()
-    expect(commandsExecute).toHaveBeenCalledWith(
-      expect.anything(),
-      '/plan-build',
-      [],
-      expect.any(AbortSignal),
-    )
-  })
-
-  it('shortcut handler is a no-op without a live agent', async () => {
-    const register = vi.fn()
-    const commandsExecute = vi.fn()
-    const ctx = setupCtx({ tuiShortcuts: { register }, commandsExecute, agents: [] })
-    apply(ctx as any, {})
-    const handler = register.mock.calls[0][1].handler as () => Promise<void>
-    await handler()
-    expect(commandsExecute).not.toHaveBeenCalled()
   })
 })

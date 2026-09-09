@@ -16,16 +16,6 @@ export const DEFAULT_PLAN_SANDBOX: SandboxMode = 'read-only'
 /** Default sandbox mode while Build mode is active. */
 export const DEFAULT_BUILD_SANDBOX: SandboxMode = 'workspace-write'
 
-/**
- * Default keyboard shortcut that toggles Plan/Build mode. Kept deliberately
- * complex (three modifiers) so it collides with no terminal or browser
- * built-in: the TUI reserved set (ctrl+c/d/e/a/u/k/w, ctrl+left/right,
- * ctrl+return, alt+return, alt+up, tab, …) and the built-in actions
- * (ctrl+v/r/g/o/t/a/p/e/l/q, …) are all single-modifier, and no browser or
- * OS binds ctrl+alt+shift+p.
- */
-export const DEFAULT_SHORTCUT = 'ctrl+alt+shift+p'
-
 /** Tools forbidden while in Plan mode. */
 export const WRITE_TOOLS = new Set(['write', 'edit'])
 

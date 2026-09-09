@@ -94,24 +94,6 @@ dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
 | `/plan-build switch build` | 进入 Build 模式（可写） |
 | `/plan-build switch` | 同 `/plan-build`，切换当前模式 |
 
-## 快捷键
-
-`Ctrl+Alt+Shift+P` 在两个前端里都能切换 Plan / Build 模式（等同裸 `/plan-build`）：
-
-- **dsh-tui** — 通过插件快捷键注册表（`ctx.tuiShortcuts`）绑定。仅在普通聊天态生效；弹层/选择器打开时会独占键盘。
-- **dsh web** — 全局 keydown 监听对当前会话执行 `/plan-build`。无会话打开或处于输入法组合期间不生效。
-
-组合键刻意做得复杂（三个修饰键），不会与终端、浏览器或系统的内置快捷键冲突。可通过 `shortcut` 配置修改，支持单个字符串或数组：
-
-```yaml
-- id: plan-build-mode
-  name: '@xth26/dsh-plan-build-mode'
-  config:
-    shortcut: ['ctrl+alt+shift+p', 'alt+p']
-```
-
-组合键遵循 `ctrl+alt+shift+p` 语法，必须包含 Ctrl 或 Alt。TUI 会拒绝与其内置键位表冲突的组合（仅警告，插件照常运行）。
-
 ## 配置
 
 ```yaml
@@ -148,12 +130,6 @@ pytest -p no:cacheprovider -q tests/test_sanity.py
 4. 再次输入 `/plan-build`，应提示进入 Build 模式。
 5. 再次让 agent 调用 `write`，应允许执行。
 6. 输入 `/plan-build status`，可只查看当前模式而不切换。
-
-## 变更日志
-
-### 0.3.0（未发布）
-
-- 在 TUI（`ctx.tuiShortcuts`）与 web 前端（全局 keydown）都新增 Plan / Build 切换快捷键（默认 `Ctrl+Alt+Shift+P`）。快捷键执行 `/plan-build`，因此模式状态、生命周期事件与授权保持单一来源。可通过新增的 `shortcut` 配置键自定义（单个字符串或组合数组）。
 
 ## 许可证
 

@@ -22,6 +22,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src"],
-  "exclude": ["src/client"]
+  "include": ["src"]
 }
