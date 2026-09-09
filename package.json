@@ -1,7 +1,7 @@
 {
   "name": "@xth26/dsh-plan-build-mode",
   "description": "OpenCode-style Plan / Build hard permission model for DSH",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },
@@ -17,6 +17,10 @@
       "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"
     },
+    "./client": {
+      "types": "./lib/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
@@ -30,10 +34,16 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "platform": "web"
     }
   },
   "scripts": {
-    "build": "tsc -b tsconfig.json",
+    "build": "tsc -b tsconfig.json && tsc -b tsconfig.client.json && node scripts/build-client-bundle.mjs",
     "prepublishOnly": "pnpm build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"

@@ -1,8 +1,9 @@
 {
   "compilerOptions": {
     "target": "es2024",
-    "module": "esnext",
-    "moduleResolution": "bundler",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "declaration": true,
     "sourceMap": true,
     "declarationMap": true,
@@ -20,8 +21,7 @@
     "rewriteRelativeImportExtensions": true,
     "verbatimModuleSyntax": false,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": []
   },
-  "include": ["src"],
-  "exclude": ["src/client"]
+  "include": ["src/client"]
 }

@@ -29,6 +29,7 @@ import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 import {
   DEFAULT_BUILD_SANDBOX,
   DEFAULT_PLAN_SANDBOX,
+  DEFAULT_SHORTCUT,
   isPlanModeActive,
   planModeDenial,
   setPlanBuildMode,
@@ -40,6 +41,19 @@ import type { PlanBuildModeConfig } from './types.ts'
 export const name = 'dsh-plan-build-mode'
 /** Service dependencies for the host half. */
 export const inject = ['agents', 'tools', 'systemPrompt'] as const
+
+/**
+ * The dsh-tui plugin shortcut seam (`ctx.tuiShortcuts`), kept structural so
+ * this package never hard-depends on the optional dsh-TUI package.
+ */
+interface TuiShortcutsLike {
+  register(
+    combo: string,
+    options: { description: string; handler: () => void | Promise<void> },
+    identity?: unknown,
+  ): () => void
+}
+
 /** Configuration schema. */
 export const Config = z.object({
   planSandbox: z.union([
@@ -54,6 +68,7 @@ export const Config = z.object({
   ]).required(false),
   denyWriteTools: z.boolean().default(true),
   section: z.boolean().default(true),
+  shortcut: z.union([z.string(), z.array(z.string())]).required(false),
 })
 
 /**
@@ -155,6 +170,36 @@ export function apply(ctx: Context, config: PlanBuildModeConfig = {}): void {
           return { kind: 'success', text: `Switched to ${target} mode.` }
         },
       }))
+
+      // dsh-tui keyboard shortcut: toggles through the same /plan-build
+      // command, so state, lifecycle events and grants stay single-source.
+      // Waits on ctx.tuiShortcuts (the dsh-tui-extensions row); inert in web
+      // and headless compositions where that service never mounts. The child
+      // fiber is cleaned up with the commands scope (same pattern as the
+      // outer ctx.inject).
+      commandCtx.inject(['tuiShortcuts'], (tuiCtx) => {
+        const tuiShortcuts = tuiCtx.get('tuiShortcuts') as TuiShortcutsLike | undefined
+        if (tuiShortcuts === undefined) return
+        const combos = config.shortcut === undefined
+          ? [DEFAULT_SHORTCUT]
+          : typeof config.shortcut === 'string'
+            ? [config.shortcut]
+            : [...config.shortcut]
+        for (const combo of combos) {
+          disposers.push(tuiShortcuts.register(combo, {
+            description: 'Toggle between OpenCode Plan and Build modes',
+            handler: async (): Promise<void> => {
+              const agent = ctx.agents.list()[0]
+              if (agent === undefined) return
+              try {
+                await commandCtx.commands.execute(agent, '/plan-build', [], new AbortController().signal)
+              } catch (error) {
+                ctx.logger.warn('dsh-plan-build-mode: TUI shortcut /plan-build failed: %o', error)
+              }
+            },
+          }, ctx))
+        }
+      })
     })
 
     return () => {

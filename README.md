@@ -97,6 +97,32 @@ dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
 | `/plan-build switch build` | Enter Build mode (writable) |
 | `/plan-build switch` | Same as `/plan-build`; toggles between modes |
 
+## Keyboard shortcuts
+
+`Ctrl+Alt+Shift+P` toggles between Plan and Build mode (the same action as
+bare `/plan-build`) in both frontends:
+
+- **dsh-tui** — bound through the plugin shortcut registry (`ctx.tuiShortcuts`).
+  It matches only in the plain chat state; overlays and pickers own the
+  keyboard while open.
+- **dsh web** — a global keydown listener runs `/plan-build` against the
+  current session. Inert while no session is open and during IME composition.
+
+The combo is deliberately complex (three modifiers) so it collides with no
+terminal, browser, or OS built-in. Change it with the `shortcut` config key,
+which accepts a single string or an array:
+
+```yaml
+- id: plan-build-mode
+  name: '@xth26/dsh-plan-build-mode'
+  config:
+    shortcut: ['ctrl+alt+shift+p', 'alt+p']
+```
+
+Combos use the `ctrl+alt+shift+p` grammar and must include Ctrl or Alt. The
+TUI refuses combos reserved by its built-in keymap (with a warning; the plugin
+keeps running).
+
 ## Configuration
 
 ```yaml
@@ -133,6 +159,16 @@ After installing/linking the plugin in a DSH profile:
 4. Run `/plan-build` again to enter Build mode (writable). You should see a confirmation.
 5. Ask the agent to call `write` again. It should now be allowed.
 6. Run `/plan-build status` to check the current mode without switching.
+
+## Changelog
+
+### 0.3.0 (unreleased)
+
+- Add a Plan/Build toggle keyboard shortcut (`Ctrl+Alt+Shift+P` by default) in
+  both the TUI (`ctx.tuiShortcuts`) and the web frontend (global keydown). The
+  shortcut executes `/plan-build`, so mode state, lifecycle events and grants
+  stay single-source. Configurable via the new `shortcut` config key (a string
+  or an array of combos).
 
 ## License
 
