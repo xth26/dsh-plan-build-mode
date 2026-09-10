@@ -73,7 +73,7 @@ For `0.x` versions, the semver range `^0.1.0` only matches `0.1.x` and will **ne
 ```bash
 # Bump the installed version in the target profile
 # (run this outside a sandboxed agent session; the profile directory is not writable from DSH)
-dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@0.2.3
+dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@0.3.1
 
 # Restart the DSH process that uses that profile
 # (old Node process still holds the previous plugin code in memory)

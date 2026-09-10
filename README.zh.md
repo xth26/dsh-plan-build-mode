@@ -70,7 +70,7 @@ pnpm link --global @xth26/dsh-plan-build-mode
 ```bash
 # 在目标 profile 中提升已安装版本
 # （这条命令需要在非沙箱的终端里执行；DSH agent 无法写入 profile 目录）
-dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@0.2.3
+dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@0.3.1
 
 # 重启使用该 profile 的 DSH 进程
 # （旧的 Node 进程仍缓存着旧插件代码）
