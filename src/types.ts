@@ -4,10 +4,27 @@
  */
 
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import type {
+  ExternalDirectoryConfig,
+  ModePermissionConfig,
+  PermissionValue,
+  ToolCategory,
+} from './permissions.ts'
 
 declare module '@deepseek-ai/dsh-session/types' {
-  // This plugin reuses the existing 'sandbox/mode' event from @deepseek-ai/dsh-sandbox-policy
-  // for persistence compatibility. No new session event types are added.
+  interface SessionEventMap {
+    /**
+     * The session's Plan/Build mode was switched. Owned by this plugin: under
+     * the OpenCode-aligned configuration both Plan and Build can share the
+     * same sandbox mode (e.g. `workspace-write`), so the `sandbox/mode` event
+     * alone can no longer distinguish them — this event is the durable mode
+     * carrier. `sandbox/mode` is still appended for sandbox enforcement when
+     * the target sandbox actually differs from the current one.
+     */
+    'plan-build/mode': {
+      mode: 'plan' | 'build'
+    }
+  }
 }
 
 /**
@@ -16,6 +33,9 @@ declare module '@deepseek-ai/dsh-session/types' {
 export interface PlanBuildModeConfig {
   /**
    * Sandbox mode enforced while Plan mode is active.
+   * Under the OpenCode-aligned config this may equal `buildSandbox`
+   * (e.g. both `workspace-write`): read-only is then enforced by the
+   * permission gate instead of the sandbox.
    * @default 'read-only'
    */
   planSandbox?: SandboxMode
@@ -25,7 +45,8 @@ export interface PlanBuildModeConfig {
    */
   buildSandbox?: SandboxMode
   /**
-   * Whether to deny known write tools while in Plan mode + read-only sandbox.
+   * Whether Plan mode denies write-category tools (via the permission gate).
+   * When false, Plan mode does not restrict writes by policy.
    * @default true
    */
   denyWriteTools?: boolean
@@ -34,4 +55,29 @@ export interface PlanBuildModeConfig {
    * @default true
    */
   section?: boolean
+  /**
+   * Workspace-relative directory writable in Plan mode — the OpenCode
+   * `.opencode/plans/` analog. Must stay inside the workspace.
+   * @default '.opencode/plans'
+   */
+  plansDirectory?: string
+  /**
+   * Global tool permission categories (OpenCode `permission`). Scalar
+   * `allow | ask | deny`, or object-syntax rules (`{ pattern: action, ... }`,
+   * last-match-wins, `*` catch-all, `~`/`$HOME` expansion).
+   */
+  permission?: Partial<Record<ToolCategory, PermissionValue>>
+  /**
+   * External-directory access gate (OpenCode `external_directory`): paths
+   * outside the session workspace are read freely by default
+   * (`default: 'allow'`); set `default: 'ask'` to prompt for every external
+   * access. Writes outside the workspace remain governed by the sandbox.
+   */
+  externalDirectory?: ExternalDirectoryConfig
+  /**
+   * Per-mode permission overrides, applied over the global `permission`
+   * (OpenCode agent-over-global precedence). `plan` defaults to write-deny +
+   * command-ask; `build` defaults to allow.
+   */
+  modes?: ModePermissionConfig
 }

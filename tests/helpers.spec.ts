@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  currentPlanBuildMode,
   currentSandboxMode,
   DEFAULT_BUILD_SANDBOX,
   DEFAULT_PLAN_SANDBOX,
   isPlanModeActive,
+  MODE_EVENT,
   planModeDenial,
   setPlanBuildMode,
   WRITE_TOOLS,
@@ -15,70 +17,111 @@ function event(type: SessionEvent['type'], data: unknown, seq = 1): SessionEvent
 }
 
 function session(events: SessionEvent[]): Session {
-  const appended: SessionEvent[] = []
-  return {
-    events,
+  const s = {
+    snapshotEvents: () => events,
     append: (_type: SessionEvent['type'], data: unknown) => {
-      appended.push(event(_type, data, events.length + appended.length + 1))
-      events.push(appended[appended.length - 1]!)
+      events.push(event(_type, data, events.length + 1))
     },
   } as unknown as Session
+  return s
 }
 
 describe('isPlanModeActive', () => {
-  it('returns false when no sandbox event exists', () => {
-    expect(isPlanModeActive([], DEFAULT_PLAN_SANDBOX)).toBe(false)
+  it('returns false when no mode event exists', () => {
+    expect(isPlanModeActive(session([]), DEFAULT_PLAN_SANDBOX)).toBe(false)
   })
 
-  it('returns true when current sandbox matches planSandbox', () => {
-    const events = [event('sandbox/mode', { mode: 'read-only' })]
-    expect(isPlanModeActive(events, DEFAULT_PLAN_SANDBOX)).toBe(true)
+  it('returns true when the plan-build/mode event is plan', () => {
+    const s = session([event(MODE_EVENT, { mode: 'plan' })])
+    expect(isPlanModeActive(s, DEFAULT_PLAN_SANDBOX)).toBe(true)
   })
 
-  it('returns false when current sandbox is build mode', () => {
-    const events = [event('sandbox/mode', { mode: 'workspace-write' })]
-    expect(isPlanModeActive(events, DEFAULT_PLAN_SANDBOX)).toBe(false)
+  it('returns false when the plan-build/mode event is build', () => {
+    const s = session([event(MODE_EVENT, { mode: 'build' })])
+    expect(isPlanModeActive(s, DEFAULT_PLAN_SANDBOX)).toBe(false)
+  })
+
+  it('infers plan from a legacy sandbox/mode event matching planSandbox', () => {
+    const s = session([event('sandbox/mode', { mode: 'read-only' })])
+    expect(isPlanModeActive(s, DEFAULT_PLAN_SANDBOX)).toBe(true)
   })
 
   it('returns false when planSandbox is not read-only', () => {
-    const events = [event('sandbox/mode', { mode: 'workspace-write' })]
-    expect(isPlanModeActive(events, 'workspace-write')).toBe(true)
-    expect(isPlanModeActive(events, 'danger-full-access')).toBe(false)
+    const s = session([event('sandbox/mode', { mode: 'workspace-write' })])
+    expect(isPlanModeActive(s, 'workspace-write')).toBe(true)
+    expect(isPlanModeActive(s, 'danger-full-access')).toBe(false)
+  })
+
+  it('prefers the plan-build/mode event over a legacy sandbox inference', () => {
+    const s = session([
+      event('sandbox/mode', { mode: 'read-only' }),
+      event(MODE_EVENT, { mode: 'build' }),
+    ])
+    expect(isPlanModeActive(s, DEFAULT_PLAN_SANDBOX)).toBe(false)
   })
 })
 
 describe('currentSandboxMode', () => {
   it('returns undefined without sandbox events', () => {
-    expect(currentSandboxMode([])).toBeUndefined()
+    expect(currentSandboxMode(session([]))).toBeUndefined()
   })
 
   it('returns the most recent sandbox mode', () => {
-    const events = [
+    const s = session([
       event('sandbox/mode', { mode: 'workspace-write' }),
       event('sandbox/mode', { mode: 'read-only' }),
-    ]
-    expect(currentSandboxMode(events)).toBe('read-only')
+    ])
+    expect(currentSandboxMode(s)).toBe('read-only')
+  })
+})
+
+describe('currentPlanBuildMode', () => {
+  it('returns undefined when the log has no mode events', () => {
+    expect(currentPlanBuildMode(session([]), DEFAULT_PLAN_SANDBOX)).toBeUndefined()
+  })
+
+  it('returns the most recent plan-build/mode event', () => {
+    const s = session([
+      event(MODE_EVENT, { mode: 'plan' }),
+      event(MODE_EVENT, { mode: 'build' }),
+    ])
+    expect(currentPlanBuildMode(s, DEFAULT_PLAN_SANDBOX)).toBe('build')
+  })
+
+  it('infers from sandbox/mode when no plan-build/mode exists', () => {
+    expect(currentPlanBuildMode(session([event('sandbox/mode', { mode: 'read-only' })]), DEFAULT_PLAN_SANDBOX)).toBe('plan')
+    expect(currentPlanBuildMode(session([event('sandbox/mode', { mode: 'workspace-write' })]), DEFAULT_PLAN_SANDBOX)).toBe('build')
   })
 })
 
 describe('setPlanBuildMode', () => {
-  it('appends a sandbox/mode event for plan', () => {
+  it('appends a plan-build/mode event and a sandbox/mode event for plan', () => {
     const s = session([])
     setPlanBuildMode({ session: s } as any, 'plan', DEFAULT_PLAN_SANDBOX, DEFAULT_BUILD_SANDBOX)
-    expect(s.events[0]).toMatchObject({ type: 'sandbox/mode', data: { mode: DEFAULT_PLAN_SANDBOX } })
+    expect(s.snapshotEvents()[0]).toMatchObject({ type: MODE_EVENT, data: { mode: 'plan' } })
+    expect(s.snapshotEvents()[1]).toMatchObject({ type: 'sandbox/mode', data: { mode: DEFAULT_PLAN_SANDBOX } })
   })
 
-  it('appends a sandbox/mode event for build', () => {
+  it('appends a plan-build/mode event and a sandbox/mode event for build', () => {
     const s = session([])
     setPlanBuildMode({ session: s } as any, 'build', DEFAULT_PLAN_SANDBOX, DEFAULT_BUILD_SANDBOX)
-    expect(s.events[0]).toMatchObject({ type: 'sandbox/mode', data: { mode: DEFAULT_BUILD_SANDBOX } })
+    expect(s.snapshotEvents()[0]).toMatchObject({ type: MODE_EVENT, data: { mode: 'build' } })
+    expect(s.snapshotEvents()[1]).toMatchObject({ type: 'sandbox/mode', data: { mode: DEFAULT_BUILD_SANDBOX } })
+  })
+
+  it('skips the sandbox/mode event when the target sandbox is already active (shared sandbox, B)', () => {
+    const s = session([event('sandbox/mode', { mode: 'workspace-write' })])
+    setPlanBuildMode({ session: s } as any, 'plan', 'workspace-write', 'workspace-write')
+    const snapshot = s.snapshotEvents()
+    expect(snapshot).toHaveLength(2)
+    expect(snapshot[1]).toMatchObject({ type: MODE_EVENT, data: { mode: 'plan' } })
   })
 })
 
 describe('planModeDenial', () => {
   it('allows read in plan mode', () => {
     const exec = {
-      agent: { session: session([event('sandbox/mode', { mode: DEFAULT_PLAN_SANDBOX })]) },
+      agent: { session: session([event(MODE_EVENT, { mode: 'plan' })]) },
       name: 'read',
     } as any
     expect(planModeDenial(exec, DEFAULT_PLAN_SANDBOX, WRITE_TOOLS)).toBeUndefined()
@@ -86,7 +129,7 @@ describe('planModeDenial', () => {
 
   it('denies write in plan mode', () => {
     const exec = {
-      agent: { session: session([event('sandbox/mode', { mode: DEFAULT_PLAN_SANDBOX })]) },
+      agent: { session: session([event(MODE_EVENT, { mode: 'plan' })]) },
       name: 'write',
     } as any
     expect(planModeDenial(exec, DEFAULT_PLAN_SANDBOX, WRITE_TOOLS)).toContain('forbidden in Plan Mode')
@@ -94,7 +137,7 @@ describe('planModeDenial', () => {
 
   it('allows write in build mode', () => {
     const exec = {
-      agent: { session: session([event('sandbox/mode', { mode: DEFAULT_BUILD_SANDBOX })]) },
+      agent: { session: session([event(MODE_EVENT, { mode: 'build' })]) },
       name: 'write',
     } as any
     expect(planModeDenial(exec, DEFAULT_PLAN_SANDBOX, WRITE_TOOLS)).toBeUndefined()
@@ -102,7 +145,7 @@ describe('planModeDenial', () => {
 
   it('allows write when configured planSandbox is not read-only', () => {
     const exec = {
-      agent: { session: session([event('sandbox/mode', { mode: 'workspace-write' })]) },
+      agent: { session: session([event(MODE_EVENT, { mode: 'plan' })]) },
       name: 'write',
     } as any
     expect(planModeDenial(exec, 'workspace-write', WRITE_TOOLS)).toBeUndefined()

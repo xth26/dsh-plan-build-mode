@@ -2,13 +2,30 @@
 
 OpenCode-style Plan / Build hard permission model for DeepSeek Harness.
 
-This plugin adds an independent Plan/Build mode switch to DSH:
+This plugin adds an independent Plan/Build mode switch to DSH and gates tool
+access with an OpenCode-style permission engine (`allow | ask | deny`):
 
-- **Plan mode** enforces a `read-only` sandbox and blocks mutating tools (`write`, `edit`).
-- **Build mode** restores `workspace-write` and allows edits.
+- **Plan mode** is read-only *by policy*: every write-category tool is denied
+  except writes under the configured plans directory (`.opencode/plans/`), so
+  you can persist plan files while the agent stays read-only everywhere else.
+- **Build mode** is writable: the approved plan can be executed.
+- **Reads are unrestricted in both modes**, including files outside the
+  workspace — matching DSH, where reads pass through every sandbox mode. Only
+  *modifications* are gated (OpenCode `external_directory`).
 - DSH's built-in `/plan` soft-guidance mode is left untouched.
 
-The tool denial only takes effect when Plan mode is configured as `read-only`. When the session has not been switched, Build mode is active by default.
+The shipped `cordis.patch.yml` configures both sandboxes as `workspace-write`;
+"read-only" in Plan mode is enforced by the permission gate, not by the
+sandbox. This is what makes plan files persist under `.opencode/plans/` while
+everything else stays read-only.
+
+## Version compatibility
+
+| Plugin version | DSH version | Notes |
+|---|---|---|
+| `0.5.x` | `>= 0.1.5-rc.1` | Adds the OpenCode permission gate and `/permission`; mode is carried by the `plan-build/mode` session event (legacy sessions are inferred from `sandbox/mode`). |
+| `0.4.x` | `>= 0.1.5-rc.1` | Uses `session.snapshotEvents()`; DSH 0.1.5 removed the `session.events` snapshot getter. |
+| `<= 0.3.1` | `0.1.0-rc.x` | Legacy releases; broken on DSH 0.1.5+ because of the API change above. |
 
 ## Installation
 
@@ -27,7 +44,10 @@ when the package is loaded by a DSH profile.
 
 ## Using the same Plan/Build mode in both web and TUI
 
-Plan/Build mode state is stored in the session event log (`sandbox/mode` event). Both `dsh web` and `dsh --profile <name>` use the same session store when they share the same profile and session ID.
+Plan/Build mode state is stored in the session event log (the plugin-owned
+`plan-build/mode` event, plus `sandbox/mode` for sandbox enforcement). Both
+`dsh web` and `dsh --profile <name>` use the same session store when they share
+the same profile and session ID.
 
 - **Same profile**: if you run `dsh web --profile web` and `dsh --profile web`, the mode is shared because the session events are shared.
 - **Different profiles**: by default `web` and `dsh-tui` are separate profiles with separate session directories. Switching in one does **not** affect the other.
@@ -73,7 +93,7 @@ For `0.x` versions, the semver range `^0.1.0` only matches `0.1.x` and will **ne
 ```bash
 # Bump the installed version in the target profile
 # (run this outside a sandboxed agent session; the profile directory is not writable from DSH)
-dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@0.3.1
+dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@0.5.0
 
 # Restart the DSH process that uses that profile
 # (old Node process still holds the previous plugin code in memory)
@@ -87,15 +107,30 @@ Then start `dsh web` or `dsh tui` again. To always pull the latest published ver
 dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
 ```
 
+### Upgrade notes (0.4.x → 0.5.x)
+
+- `planSandbox` and `buildSandbox` **may now be equal** (the shipped patch uses
+  `workspace-write` for both); the permission gate enforces the read-only
+  policy in Plan mode. The old "must differ" requirement is gone.
+- Mode state moves to the plugin-owned `plan-build/mode` event. Sessions that
+  only have `sandbox/mode` events are inferred on load and pinned to a real
+  `plan-build/mode` event at session start, so no history is lost.
+- The legacy `denyWriteTools` option still works: setting it to `false` lets
+  the agent write in Plan mode (equivalent to overriding `modes.plan.edit =
+  allow`).
+
 ## Usage
 
 | Command | Effect |
 |---|---|
 | `/plan-build` | Toggle between Plan and Build modes |
 | `/plan-build status` | Show the current mode |
-| `/plan-build switch plan` | Enter Plan mode (read-only) |
+| `/plan-build switch plan` | Enter Plan mode (read-only by policy) |
 | `/plan-build switch build` | Enter Build mode (writable) |
 | `/plan-build switch` | Same as `/plan-build`; toggles between modes |
+| `/permission status` | Show the external-path default, rules, and the session allowlist |
+| `/permission allow <pattern>` | Add a pattern to this session's allowlist (OpenCode "always") |
+| `/permission deny <pattern>` | Remove a pattern from this session's allowlist |
 
 ## Configuration
 
@@ -103,17 +138,92 @@ dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
 - id: plan-build-mode
   name: '@xth26/dsh-plan-build-mode'
   config:
-    planSandbox: read-only
+    planSandbox: workspace-write
     buildSandbox: workspace-write
     denyWriteTools: true
     section: true
+    plansDirectory: .opencode/plans
+    externalDirectory:
+      default: allow   # allow | ask | deny — reads outside the workspace
 ```
 
-`planSandbox` and `buildSandbox` must differ.
+`planSandbox` and `buildSandbox` may be equal or differ. When they differ, mode
+switches also move the sandbox (`read-only` → `workspace-write` etc.). When
+they are equal (shipped default), the permission gate is what enforces the
+Plan-mode policy.
+
+### Permission model
+
+Each tool maps to a category:
+
+| Category | Tools |
+|---|---|
+| `read` | `read`, `read_image`, `pdf_read`, `docx_read`, `pptx_read`, `xlsx_read` |
+| `edit` | `write`, `edit`, `pdf_create`, `docx_create`, `pptx_create`, `xlsx_write`, `xlsx_edit` |
+| `glob` | `glob` |
+| `grep` | `grep` |
+| `bash` | `bash` |
+| `pwsh` | `pwsh` |
+| `webfetch` | `web_fetch` |
+| `websearch` | `web_search` |
+
+A category value is either a scalar (`allow | ask | deny`) or an object of
+ordered rules, like OpenCode:
+
+```yaml
+permission:
+  read:
+    '*': allow
+    '**/.env': deny
+    '**/.env.*': deny
+    '**/.env.example': allow   # last matching rule wins
+  bash: ask
+  edit: deny
+```
+
+Patterns support OpenCode wildcards (`*` matches any characters including `/`,
+`?` matches exactly one character, `**` behaves like `*`) and `~`/`$HOME`
+expansion. Rules are evaluated last-match-wins. The default rules mirror
+OpenCode: most categories `allow`; `.env*` reads are denied (`.env.example`
+allowed back).
+
+Plan mode overrides (unless overridden by `modes.plan` or `denyWriteTools:
+false`): `edit: deny`, `bash: ask`, `pwsh: ask` — mirroring OpenCode's plan
+agent defaults. `modes.plan` / `modes.build` override the global permission for
+that mode, like OpenCode's agent-specific overrides.
+
+```yaml
+modes:
+  plan:
+    bash: deny   # instead of the default ask
+  build:
+    read: allow
+```
+
+### Plans carve-out
+
+In Plan mode, `edit`-category writes under `plansDirectory` (default
+`.opencode/plans/`, relative to the session workspace) are always allowed, so
+`/plan-build` and plan files keep working. Every other write in Plan mode is
+denied with a reason that includes `forbidden in Plan Mode`.
+
+### External paths
+
+- **Reads** outside the workspace are allowed by default in both modes
+  (`externalDirectory.default: allow`). Set it to `ask` for full OpenCode
+  behavior: the agent asks for approval on external reads.
+- **Writes** outside the workspace are governed by the sandbox. Under
+  `workspace-write` they cannot be permitted, so instead of prompting (which
+  would just fail at the sandbox), the plugin denies with an escalation hint —
+  retry the same tool with `sandbox_permissions` + `justification`.
+- `/permission allow <pattern>` adds a session-scoped allowlist entry
+  (OpenCode "always"), persisted in memory for the session's lifetime.
 
 ## Plan mode: command-line Python for inspection
 
-While Plan mode is read-only and blocks `write`/`edit` tools, it is **encouraged** to run short, read-only command-line Python snippets to inspect data and validate assumptions. For example:
+While Plan mode denies `write`/`edit` tools, it is **encouraged** to run short,
+read-only command-line Python snippets to inspect data and validate
+assumptions. For example:
 
 ```bash
 python -B -c "import json, sys; data = json.load(open('data/sample.json')); print(len(data))"
@@ -121,18 +231,24 @@ python -B -c "import pandas as pd; print(pd.read_csv('data.csv').describe())"
 pytest -p no:cacheprovider -q tests/test_sanity.py
 ```
 
-Use `-B` (or set `PYTHONDONTWRITEBYTECODE=1`) and `pytest -p no:cacheprovider` to avoid writing `__pycache__` or `.pytest_cache`. The read-only sandbox is the final guardrail; any command that tries to write files will still be blocked at the sandbox layer.
+Use `-B` (or set `PYTHONDONTWRITEBYTECODE=1`) and `pytest -p no:cacheprovider`
+to avoid writing `__pycache__` or `.pytest_cache`. The permission gate and the
+sandbox are the final guardrails; anything that tries to write files is blocked
+at the gate (Plan mode) or the sandbox layer (Build mode).
 
 ## Local integration check
 
 After installing/linking the plugin in a DSH profile:
 
 1. Start DSH with that profile.
-2. Run `/plan-build` to enter Plan mode (read-only). You should see a confirmation.
-3. Ask the agent to call the `write` tool. It should be denied with a reason.
-4. Run `/plan-build` again to enter Build mode (writable). You should see a confirmation.
-5. Ask the agent to call `write` again. It should now be allowed.
-6. Run `/plan-build status` to check the current mode without switching.
+2. Run `/plan-build` to enter Plan mode (read-only by policy). You should see a confirmation.
+3. Ask the agent to call the `write` tool on `src/x.ts`. It should be denied with a reason containing `forbidden in Plan Mode`.
+4. Ask the agent to call `write` on `.opencode/plans/x.md`. It should be **allowed** (plans carve-out).
+5. Run `/plan-build` again to enter Build mode (writable). You should see a confirmation.
+6. Ask the agent to call `write` on `src/x.ts`. It should now be allowed.
+7. Ask the agent to read a file outside the workspace. It should be allowed without prompting (default `external_directory: allow`).
+8. Run `/permission status` to inspect the gate; try `/permission allow ~/projects/**` to add a session allowlist entry.
+9. Run `/plan-build status` to check the current mode without switching.
 
 ## License
 

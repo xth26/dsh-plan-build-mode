@@ -1,10 +1,10 @@
 /**
  * Package-owned invariant companion for `dsh-plan-build-mode`.
  *
- * This plugin stores its state entirely in the existing `sandbox/mode` event
- * (owned by `@deepseek-ai/dsh-sandbox-policy`), so there is no custom event
- * type to validate. The companion is kept as a no-op installer so downstream
- * deployments can still mount `dsh-plan-build-mode/invariant` if desired.
+ * The plugin stores its Plan/Build mode in its own `plan-build/mode` session
+ * event, so the companion validates that event's payload before it reaches
+ * the durable log. The `sandbox/mode` event it also writes is validated by
+ * `@deepseek-ai/dsh-sandbox-policy`.
  *
  * @module dsh-plan-build-mode/invariant
  */
@@ -17,10 +17,33 @@ export const name = 'dsh-plan-build-mode-invariant'
 /** Service required before the companion can reserve package ownership. */
 export const inject = ['invariants'] as const
 
-/** No-op installer: state lives in sandbox/mode, validated by dsh-sandbox-policy. */
-const install: InvariantInstaller = Object.assign(() => {
-  // Intentionally empty: this plugin does not introduce new session event types.
-}, { inject: [] })
+/** Validate one `plan-build/mode` event before it reaches the durable log. */
+function validateEvent(event: { type: string; data: unknown }, fail: (message: string) => never): void {
+  if (event.type !== 'plan-build/mode') return
+  const mode = (event.data as { mode?: unknown } | null | undefined)?.mode
+  if (mode !== 'plan' && mode !== 'build') {
+    fail(`plan-build/mode carries invalid mode ${JSON.stringify(mode)}; expected 'plan' or 'build'`)
+  }
+}
+
+/** Validate loaded and newly appended plan-build/mode state. */
+const install: InvariantInstaller = Object.assign(
+  (ctx: Context & { sessions: { list(): { snapshotEvents(): readonly { type: string; data: unknown }[] }[] } }, fail: (message: string) => never) => {
+    const seed = (session: { snapshotEvents(): readonly { type: string; data: unknown }[] }) => {
+      for (const event of session.snapshotEvents()) validateEvent(event, fail)
+    }
+    for (const session of ctx.sessions.list()) seed(session)
+    ctx.on('session/created', (session: { snapshotEvents(): readonly { type: string; data: unknown }[] }) => {
+      seed(session)
+    }, { global: true })
+    ctx.on('internal/dispatch', (_mode: string, eventName: string, args: any[]) => {
+      if (eventName !== 'session/event') return
+      const event = args[1] as { type: string; data: unknown }
+      validateEvent(event, fail)
+    }, { global: true })
+  },
+  { inject: ['sessions'] },
+)
 
 /**
  * Register the plan-build-mode invariant companion.

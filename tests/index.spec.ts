@@ -1,21 +1,32 @@
 import { describe, expect, it, vi } from 'vitest'
+import path from 'node:path'
 import { apply } from '../src/index.ts'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 
-function makeSession(events: Session['events'] = []): Session {
-  return {
-    events,
-    append: (_type, data) => {
+/** An absolute path guaranteed to sit outside the session working directory. */
+const outsidePath = path.join(path.parse(process.cwd()).root, 'dsh-plan-build-mode-external.txt')
+
+function makeSession(events: SessionEvent[] = [], cwd = process.cwd()): Session {
+  const session = {
+    id: 'test-session',
+    header: { cwd },
+    append: (_type: SessionEvent['type'], data: unknown) => {
       events.push({ type: _type, data, seq: events.length + 1, time: Date.now() } as any)
     },
   } as unknown as Session
+  ;(session as any).snapshotEvents = () => events
+  return session
 }
 
-function makeAgent(events: Session['events'] = []) {
-  return { session: makeSession(events) }
+function makeAgent(events: SessionEvent[] = [], cwd?: string) {
+  return { session: makeSession(events, cwd) }
+}
+
+interface ApprovalMock {
+  request: ReturnType<typeof vi.fn>
 }
 
 interface MockCtx {
@@ -23,19 +34,20 @@ interface MockCtx {
   systemPrompt: { section: ReturnType<typeof vi.fn> }
   on: ReturnType<typeof vi.fn>
   inject: ReturnType<typeof vi.fn>
+  get: ReturnType<typeof vi.fn>
 }
 
-function setupCtx(): MockCtx & { agents: { list: ReturnType<typeof vi.fn> } } {
+function setupCtx(options: { approval?: ApprovalMock } = {}): MockCtx {
   const disposers: (() => void)[] = []
   const systemPrompt = { section: vi.fn() }
-  const on = vi.fn((_event, handler) => {
+  const on = vi.fn((_event, _handler) => {
     disposers.push(() => {})
     return () => {}
   })
   const inject = vi.fn((_services, cb) => {
-    const commandCtx = { commands: { register: vi.fn() } }
-    cb(commandCtx)
+    cb({ commands: { register: vi.fn() } })
   })
+  const get = vi.fn((name: string) => (name === 'approval' ? options.approval : undefined))
   const ctx = {
     effect: (fn: () => (() => void) | void) => {
       const dispose = fn()
@@ -47,25 +59,32 @@ function setupCtx(): MockCtx & { agents: { list: ReturnType<typeof vi.fn> } } {
     systemPrompt,
     on,
     inject,
-    agents: { list: vi.fn(() => []) },
+    get,
   }
   return ctx as any
 }
 
-function invokeCommand(ctx: MockCtx, rawInput: string, events: Session['events'] = []): CommandResult {
-  const command = ctx.inject.mock.calls[0][1]({ commands: { register: vi.fn() } })
-  // The inject callback receives a context with commands.register; capture the registered definition.
-  // We re-run a fresh inject to grab the registered handler.
-  let handler: ((invocation: CommandInvocation) => CommandResult) | undefined
+interface RegisteredCommand {
+  name: string
+  handler: (invocation: CommandInvocation) => CommandResult
+}
+
+function registeredCommands(ctx: MockCtx): Record<string, RegisteredCommand['handler']> {
+  const handlers: Record<string, RegisteredCommand['handler']> = {}
   const captureCtx = {
     commands: {
-      register: (def: { handler: (invocation: CommandInvocation) => CommandResult }) => {
-        handler = def.handler
+      register: (def: RegisteredCommand) => {
+        handlers[def.name] = def.handler
       },
     },
   }
   ctx.inject.mock.calls[0][1](captureCtx)
-  return handler!({ agent: makeAgent(events), rawInput } as CommandInvocation)
+  return handlers
+}
+
+function invokeCommand(ctx: MockCtx, name: string, rawInput: string, events: SessionEvent[] = []): CommandResult {
+  const handlers = registeredCommands(ctx)
+  return handlers[name]!({ agent: makeAgent(events), rawInput } as CommandInvocation)
 }
 
 function getSystemPromptText(ctx: MockCtx): (context: AssembleContext) => string {
@@ -76,22 +95,32 @@ function getToolsListener(ctx: MockCtx) {
   return ctx.on.mock.calls.find(([event]) => event === 'tools/pre-execute')?.[1]
 }
 
-function makeToolExecution(name: string, agent: ReturnType<typeof makeAgent>): ToolExecution {
-  return { name, agent } as unknown as ToolExecution
+function makeToolExecution(name: string, agent: ReturnType<typeof makeAgent>, args?: unknown): ToolExecution {
+  return {
+    name,
+    agent,
+    callId: 'call-1',
+    signal: new AbortController().signal,
+    arguments: args,
+  } as unknown as ToolExecution
 }
 
+const PLAN_EVENT = { type: 'plan-build/mode', data: { mode: 'plan' }, seq: 1, time: 0 } as any
+const BUILD_EVENT = { type: 'plan-build/mode', data: { mode: 'build' }, seq: 1, time: 0 } as any
+
 describe('apply', () => {
-  it('throws when planSandbox equals buildSandbox', () => {
+  it('allows equal plan and build sandboxes (OpenCode-aligned B config)', () => {
     const ctx = setupCtx()
-    expect(() => apply(ctx as any, { planSandbox: 'read-only', buildSandbox: 'read-only' })).toThrow(
-      "planSandbox and buildSandbox must be different"
-    )
+    expect(() => apply(ctx as any, { planSandbox: 'workspace-write', buildSandbox: 'workspace-write' })).not.toThrow()
   })
 
-  it('registers the plan-build command', () => {
+  it('registers the plan-build and permission commands', () => {
     const ctx = setupCtx()
     apply(ctx as any, {})
     expect(ctx.inject).toHaveBeenCalledWith(['commands'], expect.any(Function))
+    const handlers = registeredCommands(ctx)
+    expect(handlers['plan-build']).toBeTypeOf('function')
+    expect(handlers['permission']).toBeTypeOf('function')
   })
 
   it('injects the plan-build:policy system prompt section', () => {
@@ -102,156 +131,208 @@ describe('apply', () => {
     )
   })
 
-  it('toggles to Plan mode with bare /plan-build', () => {
+  it('pins a mode event on session creation', () => {
     const ctx = setupCtx()
     apply(ctx as any, {})
-    const events: Session['events'] = []
-    const result = invokeCommand(ctx, '', events)
-    expect(result.kind).toBe('success')
-    expect(result.text).toContain('Switched to plan mode.')
-    expect(result.text).toContain('Run /plan-build again to switch back.')
-    expect(events[0]).toMatchObject({ type: 'sandbox/mode', data: { mode: 'read-only' } })
-  })
-
-  it('toggles to Plan mode with /plan-build switch', () => {
-    const ctx = setupCtx()
-    apply(ctx as any, {})
-    const events: Session['events'] = []
-    const result = invokeCommand(ctx, 'switch', events)
-    expect(result.kind).toBe('success')
-    expect(result.text).toContain('Switched to plan mode.')
-    expect(result.text).toContain('Run /plan-build again to switch back.')
-    expect(events[0]).toMatchObject({ type: 'sandbox/mode', data: { mode: 'read-only' } })
-  })
-
-  it('reports status in Plan mode', () => {
-    const ctx = setupCtx()
-    apply(ctx as any, {})
-    const events: Session['events'] = [{ type: 'sandbox/mode', data: { mode: 'read-only' }, seq: 1, time: 0 } as any]
-    const result = invokeCommand(ctx, 'status', events)
-    expect(result.kind).toBe('success')
-    expect(result.text).toContain('Plan mode is active')
-    expect(result.text).not.toContain('Switched')
-  })
-
-  it('reports status in Build mode', () => {
-    const ctx = setupCtx()
-    apply(ctx as any, {})
-    const events: Session['events'] = [{ type: 'sandbox/mode', data: { mode: 'workspace-write' }, seq: 1, time: 0 } as any]
-    const result = invokeCommand(ctx, 'status', events)
-    expect(result.kind).toBe('success')
-    expect(result.text).toContain('Build mode is active')
-    expect(result.text).not.toContain('Switched')
-  })
-
-  it('toggles back to Build mode with bare /plan-build', () => {
-    const ctx = setupCtx()
-    apply(ctx as any, {})
-    const events: Session['events'] = [{ type: 'sandbox/mode', data: { mode: 'read-only' }, seq: 1, time: 0 } as any]
-    const result = invokeCommand(ctx, '', events)
-    expect(result.kind).toBe('success')
-    expect(result.text).toContain('Switched to build mode.')
-    expect(result.text).toContain('Run /plan-build again to switch back.')
-    expect(events[1]).toMatchObject({ type: 'sandbox/mode', data: { mode: 'workspace-write' } })
-  })
-
-  it('switches to Plan mode explicitly', () => {
-    const ctx = setupCtx()
-    apply(ctx as any, {})
-    const events: Session['events'] = []
-    const result = invokeCommand(ctx, 'switch plan', events)
-    expect(result.kind).toBe('success')
-    expect(result.text).toBe('Switched to plan mode.')
-    expect(events[0]).toMatchObject({ type: 'sandbox/mode', data: { mode: 'read-only' } })
-  })
-
-  it('switches to Build mode explicitly', () => {
-    const ctx = setupCtx()
-    apply(ctx as any, {})
-    const events: Session['events'] = [{ type: 'sandbox/mode', data: { mode: 'read-only' }, seq: 1, time: 0 } as any]
-    const result = invokeCommand(ctx, 'switch build', events)
-    expect(result.kind).toBe('success')
-    expect(result.text).toBe('Switched to build mode.')
-    expect(events[1]).toMatchObject({ type: 'sandbox/mode', data: { mode: 'workspace-write' } })
-  })
-
-  it('reports already active mode', () => {
-    const ctx = setupCtx()
-    apply(ctx as any, {})
-    const events: Session['events'] = [{ type: 'sandbox/mode', data: { mode: 'read-only' }, seq: 1, time: 0 } as any]
-    const result = invokeCommand(ctx, 'switch plan', events)
-    expect(result.kind).toBe('success')
-    expect(result.text).toBe('Already in plan mode.')
-  })
-
-  it('rejects invalid arguments', () => {
-    const ctx = setupCtx()
-    apply(ctx as any, {})
-    const result = invokeCommand(ctx, 'foobar')
-    expect(result.kind).toBe('error')
-    expect(result.text).toContain('Usage: /plan-build (toggle)')
-  })
-
-  it('system prompt section describes Plan mode', () => {
-    const ctx = setupCtx()
-    apply(ctx as any, {})
-    const text = getSystemPromptText(ctx)
-    const agent = makeAgent([{ type: 'sandbox/mode', data: { mode: 'read-only' }, seq: 1, time: 0 } as any])
-    const prompt = text({ agent } as AssembleContext)
-    expect(prompt).toContain('You are in OpenCode Plan Mode')
-    expect(prompt).toContain('python -B')
-    expect(prompt).toContain('read data files')
-  })
-
-  it('system prompt section describes Build mode', () => {
-    const ctx = setupCtx()
-    apply(ctx as any, {})
-    const text = getSystemPromptText(ctx)
-    const agent = makeAgent([{ type: 'sandbox/mode', data: { mode: 'workspace-write' }, seq: 1, time: 0 } as any])
-    const prompt = text({ agent } as AssembleContext)
-    expect(prompt).toContain('You are in OpenCode Build Mode')
-    expect(prompt).toContain('/plan-build')
-    expect(prompt).toContain('Plan Mode')
-  })
-
-  it('system prompt section is empty when agent is undefined', () => {
-    const ctx = setupCtx()
-    apply(ctx as any, {})
-    const text = getSystemPromptText(ctx)
-    expect(text({} as AssembleContext)).toBe('')
+    expect(ctx.on).toHaveBeenCalledWith('session/created', expect.any(Function))
   })
 })
 
-describe('tools/pre-execute', () => {
-  it('denies write tool in Plan mode', async () => {
+describe('plan-build command', () => {
+  it('toggles from default build to plan and appends the mode events', () => {
     const ctx = setupCtx()
     apply(ctx as any, {})
-    const listener = getToolsListener(ctx)
-    const agent = makeAgent([{ type: 'sandbox/mode', data: { mode: 'read-only' }, seq: 1, time: 0 } as any])
-    const result = await listener(makeToolExecution('write', agent), async () => ({ kind: 'allow' } as PreToolDecision))
+    const events: SessionEvent[] = []
+    const result = invokeCommand(ctx, 'plan-build', '', events)
+    expect(result).toMatchObject({ kind: 'success' })
+    const snapshot = (makeAgent(events).session as any).snapshotEvents()
+    expect(snapshot).toHaveLength(2)
+    expect(snapshot[0]).toMatchObject({ type: 'plan-build/mode', data: { mode: 'plan' } })
+    expect(snapshot[1]).toMatchObject({ type: 'sandbox/mode', data: { mode: 'read-only' } })
+  })
+
+  it('reports status for plan and build', () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const plan = invokeCommand(ctx, 'plan-build', 'status', [PLAN_EVENT])
+    expect(plan).toMatchObject({ kind: 'success' })
+    expect((plan as any).text).toContain('Plan mode is active')
+    const build = invokeCommand(ctx, 'plan-build', 'status', [BUILD_EVENT])
+    expect((build as any).text).toContain('Build mode is active')
+  })
+})
+
+describe('permission command', () => {
+  it('reports status with the external default and allowlist', () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const result = invokeCommand(ctx, 'permission', 'status')
+    expect(result).toMatchObject({ kind: 'success' })
+    expect((result as any).text).toContain('external_directory default: allow')
+  })
+
+  it('manages the session allowlist', () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const allow = invokeCommand(ctx, 'permission', 'allow ~/projects/personal/**')
+    expect(allow).toMatchObject({ kind: 'success' })
+    const status = invokeCommand(ctx, 'permission', 'status')
+    expect((status as any).text).toContain('~/projects/personal/**')
+    const deny = invokeCommand(ctx, 'permission', 'deny ~/projects/personal/**')
+    expect(deny).toMatchObject({ kind: 'success' })
+    const after = invokeCommand(ctx, 'permission', 'status')
+    expect((after as any).text).toContain('(empty)')
+  })
+
+  it('rejects malformed usage', () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const result = invokeCommand(ctx, 'permission', 'bogus')
+    expect(result).toMatchObject({ kind: 'error' })
+  })
+})
+
+describe('permission gate (tools/pre-execute)', () => {
+  it('denies write in Plan mode with the historical phrase', async () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const listener = getToolsListener(ctx)!
+    const agent = makeAgent([PLAN_EVENT])
+    const next = vi.fn(async () => ({ kind: 'allow' } as PreToolDecision))
+    const result = await listener(makeToolExecution('write', agent, { file_path: 'src/x.ts' }), next)
     expect(result).toMatchObject({ kind: 'deny' })
     expect((result as any).reason).toContain('forbidden in Plan Mode')
+    expect(next).not.toHaveBeenCalled()
   })
 
-  it('allows read tool in Plan mode', async () => {
+  it('allows writing under the plans directory in Plan mode', async () => {
     const ctx = setupCtx()
     apply(ctx as any, {})
-    const listener = getToolsListener(ctx)
-    const agent = makeAgent([{ type: 'sandbox/mode', data: { mode: 'read-only' }, seq: 1, time: 0 } as any])
+    const listener = getToolsListener(ctx)!
+    const agent = makeAgent([PLAN_EVENT])
+    const next = vi.fn(async () => ({ kind: 'allow' } as PreToolDecision))
+    const result = await listener(makeToolExecution('write', agent, { file_path: '.opencode/plans/x.md' }), next)
+    expect(result).toMatchObject({ kind: 'allow' })
+    expect(next).toHaveBeenCalled()
+  })
+
+  it('allows read in Plan mode', async () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const listener = getToolsListener(ctx)!
+    const agent = makeAgent([PLAN_EVENT])
     const next = vi.fn(async () => ({ kind: 'allow' } as PreToolDecision))
     const result = await listener(makeToolExecution('read', agent), next)
-    expect(next).toHaveBeenCalled()
     expect(result).toMatchObject({ kind: 'allow' })
+    expect(next).toHaveBeenCalled()
   })
 
-  it('allows write tool in Build mode', async () => {
+  it('allows write in Build mode', async () => {
     const ctx = setupCtx()
     apply(ctx as any, {})
-    const listener = getToolsListener(ctx)
-    const agent = makeAgent([{ type: 'sandbox/mode', data: { mode: 'workspace-write' }, seq: 1, time: 0 } as any])
+    const listener = getToolsListener(ctx)!
+    const agent = makeAgent([BUILD_EVENT])
     const next = vi.fn(async () => ({ kind: 'allow' } as PreToolDecision))
-    const result = await listener(makeToolExecution('write', agent), next)
-    expect(next).toHaveBeenCalled()
+    const result = await listener(makeToolExecution('write', agent, { file_path: 'src/x.ts' }), next)
     expect(result).toMatchObject({ kind: 'allow' })
+    expect(next).toHaveBeenCalled()
+  })
+
+  it('allows reading outside the workspace by default (no prompt)', async () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const listener = getToolsListener(ctx)!
+    const agent = makeAgent([BUILD_EVENT])
+    const next = vi.fn(async () => ({ kind: 'allow' } as PreToolDecision))
+    const result = await listener(makeToolExecution('read', agent, { file_path: outsidePath }), next)
+    expect(result).toMatchObject({ kind: 'allow' })
+    expect(next).toHaveBeenCalled()
+  })
+
+  it('asks and honors allowed-once for external reads when configured to ask', async () => {
+    const approval: ApprovalMock = { request: vi.fn(async () => 'allowed-once') }
+    const ctx = setupCtx({ approval })
+    apply(ctx as any, { externalDirectory: { default: 'ask' } })
+    const listener = getToolsListener(ctx)!
+    const agent = makeAgent([BUILD_EVENT])
+    const next = vi.fn(async () => ({ kind: 'allow' } as PreToolDecision))
+    const result = await listener(makeToolExecution('read', agent, { file_path: outsidePath }), next)
+    expect(approval.request).toHaveBeenCalled()
+    expect(result).toMatchObject({ kind: 'allow' })
+    expect(next).toHaveBeenCalled()
+  })
+
+  it('fails closed when the external read ask is rejected', async () => {
+    const approval: ApprovalMock = { request: vi.fn(async () => 'rejected') }
+    const ctx = setupCtx({ approval })
+    apply(ctx as any, { externalDirectory: { default: 'ask' } })
+    const listener = getToolsListener(ctx)!
+    const agent = makeAgent([BUILD_EVENT])
+    const next = vi.fn(async () => ({ kind: 'allow' } as PreToolDecision))
+    const result = await listener(makeToolExecution('read', agent, { file_path: outsidePath }), next)
+    expect(result).toMatchObject({ kind: 'deny' })
+    expect((result as any).reason).toContain('was rejected')
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('denies an external write with an escalation hint (no ask under workspace-write)', async () => {
+    const approval: ApprovalMock = { request: vi.fn(async () => 'allowed-once') }
+    const ctx = setupCtx({ approval })
+    apply(ctx as any, { externalDirectory: { default: 'ask' } })
+    const listener = getToolsListener(ctx)!
+    const agent = makeAgent([BUILD_EVENT])
+    const next = vi.fn(async () => ({ kind: 'allow' } as PreToolDecision))
+    const result = await listener(makeToolExecution('write', agent, { file_path: outsidePath }), next)
+    expect(result).toMatchObject({ kind: 'deny' })
+    expect((result as any).reason).toContain('sandbox_permissions')
+    expect(approval.request).not.toHaveBeenCalled()
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('denies .env reads under the default read permission', async () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const listener = getToolsListener(ctx)!
+    const agent = makeAgent([BUILD_EVENT])
+    const next = vi.fn(async () => ({ kind: 'allow' } as PreToolDecision))
+    const result = await listener(makeToolExecution('read', agent, { file_path: 'src/.env' }), next)
+    expect(result).toMatchObject({ kind: 'deny' })
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('fails closed to deny when an ask has no approval channel', async () => {
+    const ctx = setupCtx()
+    apply(ctx as any, { modes: { plan: { bash: 'ask' } } })
+    const listener = getToolsListener(ctx)!
+    const agent = makeAgent([PLAN_EVENT])
+    const next = vi.fn(async () => ({ kind: 'allow' } as PreToolDecision))
+    const result = await listener(makeToolExecution('bash', agent, { command: 'ls' }), next)
+    expect(result).toMatchObject({ kind: 'deny' })
+    expect((result as any).reason).toContain('no approval channel')
+  })
+})
+
+describe('system prompt text', () => {
+  it('renders Plan-mode guidance', () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const text = getSystemPromptText(ctx)({ agent: makeAgent([PLAN_EVENT]) } as any)
+    expect(text).toContain('You are in OpenCode Plan Mode')
+    expect(text).toContain('python -B')
+    expect(text).toContain('read data files')
+  })
+
+  it('renders Build-mode guidance', () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const text = getSystemPromptText(ctx)({ agent: makeAgent([BUILD_EVENT]) } as any)
+    expect(text).toContain('You are in OpenCode Build Mode')
+    expect(text).toContain('/plan-build')
+  })
+
+  it('returns empty text without an agent (diagnostics path)', () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    expect(getSystemPromptText(ctx)({} as any)).toBe('')
   })
 })

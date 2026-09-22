@@ -1,10 +1,22 @@
 # Profile patch for dsh-plan-build-mode.
 # Loaded automatically when the package is installed in a DSH profile.
+#
+# OpenCode-aligned defaults (v0.5.0):
+# - planSandbox == buildSandbox == workspace-write: "read-only" in Plan mode is
+#   enforced by the permission gate (deny every write except the plans
+#   directory), not by the sandbox — so plan files can be persisted under
+#   .opencode/plans/.
+# - externalDirectory.default: allow — reading files outside the workspace
+#   stays permitted in both modes; only writes are gated. Set to 'ask' for
+#   full OpenCode behavior (external access prompts).
 - insert:
     - id: plan-build-mode
       name: '@xth26/dsh-plan-build-mode'
       config:
-        planSandbox: read-only
+        planSandbox: workspace-write
         buildSandbox: workspace-write
         denyWriteTools: true
         section: true
+        plansDirectory: .opencode/plans
+        externalDirectory:
+          default: allow
