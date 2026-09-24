@@ -12,8 +12,16 @@ import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 // Pulls in the 'plan-build/mode' SessionEventMap merge.
 import type {} from './types.ts'
 
-/** Default sandbox mode while Plan mode is active. */
-export const DEFAULT_PLAN_SANDBOX: SandboxMode = 'read-only'
+/**
+ * Default sandbox mode while Plan mode is active.
+ *
+ * The OpenCode-aligned shipped default is `workspace-write`: "read-only" in
+ * Plan mode is enforced by the permission gate (with the plans-directory
+ * carve-out), not by the sandbox — so plan files can persist while everything
+ * else stays read-only. Kept in code (not in the bundle patch) so the plugin
+ * can be enabled from the plugin market as a pure insert.
+ */
+export const DEFAULT_PLAN_SANDBOX: SandboxMode = 'workspace-write'
 
 /** Default sandbox mode while Build mode is active. */
 export const DEFAULT_BUILD_SANDBOX: SandboxMode = 'workspace-write'

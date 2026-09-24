@@ -26,6 +26,13 @@ function session(events: SessionEvent[]): Session {
   return s
 }
 
+describe('defaults', () => {
+  it('keeps the OpenCode-aligned sandbox defaults (workspace-write for both modes)', () => {
+    expect(DEFAULT_PLAN_SANDBOX).toBe('workspace-write')
+    expect(DEFAULT_BUILD_SANDBOX).toBe('workspace-write')
+  })
+})
+
 describe('isPlanModeActive', () => {
   it('returns false when no mode event exists', () => {
     expect(isPlanModeActive(session([]), DEFAULT_PLAN_SANDBOX)).toBe(false)
@@ -42,7 +49,7 @@ describe('isPlanModeActive', () => {
   })
 
   it('infers plan from a legacy sandbox/mode event matching planSandbox', () => {
-    const s = session([event('sandbox/mode', { mode: 'read-only' })])
+    const s = session([event('sandbox/mode', { mode: 'workspace-write' })])
     expect(isPlanModeActive(s, DEFAULT_PLAN_SANDBOX)).toBe(true)
   })
 
@@ -54,7 +61,7 @@ describe('isPlanModeActive', () => {
 
   it('prefers the plan-build/mode event over a legacy sandbox inference', () => {
     const s = session([
-      event('sandbox/mode', { mode: 'read-only' }),
+      event('sandbox/mode', { mode: 'workspace-write' }),
       event(MODE_EVENT, { mode: 'build' }),
     ])
     expect(isPlanModeActive(s, DEFAULT_PLAN_SANDBOX)).toBe(false)
@@ -89,8 +96,8 @@ describe('currentPlanBuildMode', () => {
   })
 
   it('infers from sandbox/mode when no plan-build/mode exists', () => {
-    expect(currentPlanBuildMode(session([event('sandbox/mode', { mode: 'read-only' })]), DEFAULT_PLAN_SANDBOX)).toBe('plan')
-    expect(currentPlanBuildMode(session([event('sandbox/mode', { mode: 'workspace-write' })]), DEFAULT_PLAN_SANDBOX)).toBe('build')
+    expect(currentPlanBuildMode(session([event('sandbox/mode', { mode: 'workspace-write' })]), DEFAULT_PLAN_SANDBOX)).toBe('plan')
+    expect(currentPlanBuildMode(session([event('sandbox/mode', { mode: 'read-only' })]), DEFAULT_PLAN_SANDBOX)).toBe('build')
   })
 })
 
@@ -124,20 +131,28 @@ describe('planModeDenial', () => {
       agent: { session: session([event(MODE_EVENT, { mode: 'plan' })]) },
       name: 'read',
     } as any
-    expect(planModeDenial(exec, DEFAULT_PLAN_SANDBOX, WRITE_TOOLS)).toBeUndefined()
+    expect(planModeDenial(exec, 'read-only', WRITE_TOOLS)).toBeUndefined()
   })
 
-  it('denies write in plan mode', () => {
+  it('denies write in plan mode under the legacy read-only sandbox', () => {
     const exec = {
       agent: { session: session([event(MODE_EVENT, { mode: 'plan' })]) },
       name: 'write',
     } as any
-    expect(planModeDenial(exec, DEFAULT_PLAN_SANDBOX, WRITE_TOOLS)).toContain('forbidden in Plan Mode')
+    expect(planModeDenial(exec, 'read-only', WRITE_TOOLS)).toContain('forbidden in Plan Mode')
   })
 
   it('allows write in build mode', () => {
     const exec = {
       agent: { session: session([event(MODE_EVENT, { mode: 'build' })]) },
+      name: 'write',
+    } as any
+    expect(planModeDenial(exec, 'read-only', WRITE_TOOLS)).toBeUndefined()
+  })
+
+  it('does not gate writes under the OpenCode-aligned default (workspace-write)', () => {
+    const exec = {
+      agent: { session: session([event(MODE_EVENT, { mode: 'plan' })]) },
       name: 'write',
     } as any
     expect(planModeDenial(exec, DEFAULT_PLAN_SANDBOX, WRITE_TOOLS)).toBeUndefined()

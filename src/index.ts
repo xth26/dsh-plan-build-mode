@@ -83,8 +83,8 @@ const SANDBOX = z.union([z.const('read-only'), z.const('workspace-write'), z.con
 
 /** Configuration schema. */
 export const Config = z.object({
-  planSandbox: SANDBOX.required(false),
-  buildSandbox: SANDBOX.required(false),
+  planSandbox: SANDBOX.default('workspace-write'),
+  buildSandbox: SANDBOX.default('workspace-write'),
   denyWriteTools: z.boolean().default(true),
   section: z.boolean().default(true),
   plansDirectory: z.string().default('.opencode/plans'),

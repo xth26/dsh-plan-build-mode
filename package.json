@@ -1,7 +1,7 @@
 {
   "name": "@xth26/dsh-plan-build-mode",
   "description": "OpenCode-style Plan / Build hard permission model for DSH",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publishConfig": {
     "access": "public"
   },

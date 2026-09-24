@@ -33,10 +33,10 @@ declare module '@deepseek-ai/dsh-session/types' {
 export interface PlanBuildModeConfig {
   /**
    * Sandbox mode enforced while Plan mode is active.
-   * Under the OpenCode-aligned config this may equal `buildSandbox`
-   * (e.g. both `workspace-write`): read-only is then enforced by the
-   * permission gate instead of the sandbox.
-   * @default 'read-only'
+   * The OpenCode-aligned default is `workspace-write`, so Plan-mode
+   * read-only is enforced by the permission gate (with the plans-directory
+   * carve-out) instead of the sandbox — this lets plan files persist.
+   * @default 'workspace-write'
    */
   planSandbox?: SandboxMode
   /**

@@ -14,15 +14,18 @@ access with an OpenCode-style permission engine (`allow | ask | deny`):
   *modifications* are gated (OpenCode `external_directory`).
 - DSH's built-in `/plan` soft-guidance mode is left untouched.
 
-The shipped `cordis.patch.yml` configures both sandboxes as `workspace-write`;
+The plugin's built-in defaults configure both sandboxes as `workspace-write`;
 "read-only" in Plan mode is enforced by the permission gate, not by the
 sandbox. This is what makes plan files persist under `.opencode/plans/` while
-everything else stays read-only.
+everything else stays read-only. The shipped `cordis.patch.yml` is a pure
+insert (only `id` + `name`), so the plugin can be enabled directly from the
+DSH plugin market (hot mount) without a restart.
 
 ## Version compatibility
 
 | Plugin version | DSH version | Notes |
 |---|---|---|
+| `0.5.1` | `>= 0.1.5-rc.1` | Bundle patch is now a pure insert; OpenCode-aligned defaults are baked into the plugin code so the plugin can be enabled directly from the plugin market without a restart. |
 | `0.5.x` | `>= 0.1.5-rc.1` | Adds the OpenCode permission gate and `/permission`; mode is carried by the `plan-build/mode` session event (legacy sessions are inferred from `sandbox/mode`). |
 | `0.4.x` | `>= 0.1.5-rc.1` | Uses `session.snapshotEvents()`; DSH 0.1.5 removed the `session.events` snapshot getter. |
 | `<= 0.3.1` | `0.1.0-rc.x` | Legacy releases; broken on DSH 0.1.5+ because of the API change above. |
@@ -40,7 +43,8 @@ dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode
 ```
 
 The plugin ships with a `cordis.patch.yml` that auto-injects the required row
-when the package is loaded by a DSH profile.
+when the package is loaded by a DSH profile. The patch is a pure insert, so
+enabling the plugin from the DSH plugin market also works without a restart.
 
 ## Using the same Plan/Build mode in both web and TUI
 
@@ -107,10 +111,17 @@ Then start `dsh web` or `dsh tui` again. To always pull the latest published ver
 dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
 ```
 
+### Upgrade notes (0.5.0 → 0.5.1)
+
+- `cordis.patch.yml` is now a pure insert (`id` + `name`, no `config`), so the
+  plugin can be enabled directly from the DSH plugin market. The OpenCode-aligned
+  values it used to carry are now the plugin's built-in defaults; profiles that
+  already pinned the old config keep working unchanged.
+
 ### Upgrade notes (0.4.x → 0.5.x)
 
-- `planSandbox` and `buildSandbox` **may now be equal** (the shipped patch uses
-  `workspace-write` for both); the permission gate enforces the read-only
+- `planSandbox` and `buildSandbox` **may now be equal** (the shipped defaults
+  use `workspace-write` for both); the permission gate enforces the read-only
   policy in Plan mode. The old "must differ" requirement is gone.
 - Mode state moves to the plugin-owned `plan-build/mode` event. Sessions that
   only have `sandbox/mode` events are inferred on load and pinned to a real
@@ -147,10 +158,11 @@ dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
       default: allow   # allow | ask | deny — reads outside the workspace
 ```
 
-`planSandbox` and `buildSandbox` may be equal or differ. When they differ, mode
-switches also move the sandbox (`read-only` → `workspace-write` etc.). When
-they are equal (shipped default), the permission gate is what enforces the
-Plan-mode policy.
+All values in the example above are the plugin's built-in defaults, so a bare
+pure-insert row (the shipped patch) behaves identically. `planSandbox` and
+`buildSandbox` may be equal or differ. When they differ, mode switches also
+move the sandbox (`read-only` → `workspace-write` etc.). When they are equal
+(shipped default), the permission gate is what enforces the Plan-mode policy.
 
 ### Permission model
 

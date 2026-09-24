@@ -13,14 +13,16 @@ OpenCode 风格的 Plan / Build 硬权限模型插件（DeepSeek Harness）。
   沙箱模式下都放行。只有**修改**会被门禁（对应 OpenCode 的 `external_directory`）。
 - DSH 自带的 `/plan` 软提示模式保持原样。
 
-随附的 `cordis.patch.yml` 把两个沙箱都配置为 `workspace-write`；Plan 模式的
-“只读”由权限门禁而不是沙箱强制——这正是计划文件能写到 `.opencode/plans/`、
-其余位置保持只读的原因。
+插件的内置默认值把两个沙箱都配置为 `workspace-write`；Plan 模式的“只读”由权限
+门禁而不是沙箱强制——这正是计划文件能写到 `.opencode/plans/`、其余位置保持只读
+的原因。随附的 `cordis.patch.yml` 是纯 insert（只含 `id` 与 `name`），因此可以直接
+从 DSH 插件市场启用（热挂载），无需重启。
 
 ## 版本兼容性
 
 | 插件版本 | DSH 版本 | 说明 |
 |---|---|---|
+| `0.5.1` | `>= 0.1.5-rc.1` | bundle patch 改为纯 insert；OpenCode 对齐默认值内置到插件代码，插件市场可直接启用，无需重启。 |
 | `0.5.x` | `>= 0.1.5-rc.1` | 新增 OpenCode 权限门禁与 `/permission`；模式由 `plan-build/mode` 会话事件承载（旧会话从 `sandbox/mode` 推断）。 |
 | `0.4.x` | `>= 0.1.5-rc.1` | 使用 `session.snapshotEvents()`；DSH 0.1.5 移除了 `session.events` 快照 getter。 |
 | `<= 0.3.1` | `0.1.0-rc.x` | 旧版本；在 DSH 0.1.5+ 上因上述 API 变更无法工作。 |
@@ -37,7 +39,8 @@ dsh plugin --profile web add @xth26/dsh-plan-build-mode
 dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode
 ```
 
-插件自带的 `cordis.patch.yml` 会在 DSH profile 加载时自动注入。
+插件自带的 `cordis.patch.yml` 会在 DSH profile 加载时自动注入；它是纯 insert，
+因此从 DSH 插件市场启用也可以直接生效，无需重启。
 
 ## 让 Web 和 TUI 共享同一个 Plan/Build 模式
 
@@ -102,9 +105,15 @@ Stop-Process -Name dsh -Force   # PowerShell
 dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
 ```
 
+### 升级说明（0.5.0 → 0.5.1）
+
+- `cordis.patch.yml` 改为纯 insert（只含 `id` 与 `name`，不带 `config`），插件市场
+  可直接启用。原来写在 patch 里的 OpenCode 对齐值现在内置为插件默认值；已按旧配置
+  固定值的 profile 无需改动仍可工作。
+
 ### 升级说明（0.4.x → 0.5.x）
 
-- `planSandbox` 与 `buildSandbox` **现在可以相等**（随附补丁两者都用
+- `planSandbox` 与 `buildSandbox` **现在可以相等**（随附默认两者都用
   `workspace-write`）；Plan 模式的只读策略由权限门禁强制。旧的“必须不同”限制已移除。
 - 模式状态迁移到插件专属的 `plan-build/mode` 事件。只有 `sandbox/mode` 事件的旧
   会话会在加载时被推断并在会话开始时固定为真实的 `plan-build/mode` 事件，历史不丢失。
@@ -139,9 +148,10 @@ dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
       default: allow   # allow | ask | deny —— 工作区之外的读取
 ```
 
-`planSandbox` 和 `buildSandbox` 可以相等，也可以不同。不同时，模式切换还会联动
-沙箱（`read-only` ↔ `workspace-write` 等）；相等时（随附默认），Plan 模式的策略由
-权限门禁强制。
+上面示例中的所有值都是插件内置默认值，因此随附的纯 insert patch（只有 `id` 与
+`name`）与示例行为完全一致。`planSandbox` 和 `buildSandbox` 可以相等，也可以不同。
+不同时，模式切换还会联动沙箱（`read-only` ↔ `workspace-write` 等）；相等时
+（随附默认），Plan 模式的策略由权限门禁强制。
 
 ### 权限模型
 

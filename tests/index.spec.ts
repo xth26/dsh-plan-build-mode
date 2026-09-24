@@ -148,7 +148,7 @@ describe('plan-build command', () => {
     const snapshot = (makeAgent(events).session as any).snapshotEvents()
     expect(snapshot).toHaveLength(2)
     expect(snapshot[0]).toMatchObject({ type: 'plan-build/mode', data: { mode: 'plan' } })
-    expect(snapshot[1]).toMatchObject({ type: 'sandbox/mode', data: { mode: 'read-only' } })
+    expect(snapshot[1]).toMatchObject({ type: 'sandbox/mode', data: { mode: 'workspace-write' } })
   })
 
   it('reports status for plan and build', () => {
