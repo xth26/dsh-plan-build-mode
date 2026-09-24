@@ -165,7 +165,11 @@ export function apply(ctx: Context, config: PlanBuildModeConfig = {}): void {
       session.append('plan-build/mode', { mode: inferred })
     }
     disposers.push(ctx.on('session/created', pinMode))
-    const sessions = (ctx as { sessions?: { list(): Session[] } }).sessions
+    // `sessions` is an optional service provided by a sibling loader entry, so
+    // read it via ctx.get() (returns undefined when absent) instead of ctx.X —
+    // an undeclared property read on the Cordis context proxy throws
+    // `cannot get property "sessions" without inject` (Cordis 4.x strict mode).
+    const sessions = (ctx as { get?: (name: string) => unknown }).get?.('sessions') as { list(): Session[] } | undefined
     if (sessions !== undefined) {
       for (const session of sessions.list()) pinMode(session)
     }
