@@ -1,13 +1,35 @@
-# Profile patch for dsh-plan-build-mode.
+# Profile patch for @xth26/dsh-plan-build-mode.
 # Loaded automatically when the package is installed in a DSH profile.
 #
-# Deliberately a PURE INSERT (no `config:` block): the plugin market / live
-# hot-mount path only applies pure inserts without a restart. Every
-# OpenCode-aligned default lives in the plugin code instead:
-#   planSandbox == buildSandbox == workspace-write
-#   denyWriteTools: true, section: true
-#   plansDirectory: .opencode/plans
-#   externalDirectory.default: allow
+# 1. Insert the plugin itself (pure insert: hot-mountable from the market).
+# 2. Override the shared `permission` row (dsh-permission-presets) to extend
+#    the preset table with the OpenCode-style modes. `config` is replaced
+#    wholesale by the loader, so the shipped presets are restated here —
+#    oc-plan / oc-build appear in the stock permission dropdown, and picking
+#    any other preset is the exit from Plan mode.
 - insert:
     - id: plan-build-mode
       name: '@xth26/dsh-plan-build-mode'
+- id: permission
+  name: '@deepseek-ai/dsh-permission-presets'
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      oc-plan:
+        sandbox: workspace-write
+        approval: ask
+        name: oc-plan
+        description: OpenCode Plan mode — read-only by policy, plan files stay writable
+      oc-build:
+        sandbox: workspace-write
+        approval: ask
+        name: oc-build
+        description: OpenCode Build mode — full edit within the sandbox
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never

@@ -11,21 +11,10 @@ import type {
   ToolCategory,
 } from './permissions.ts'
 
-declare module '@deepseek-ai/dsh-session/types' {
-  interface SessionEventMap {
-    /**
-     * The session's Plan/Build mode was switched. Owned by this plugin: under
-     * the OpenCode-aligned configuration both Plan and Build can share the
-     * same sandbox mode (e.g. `workspace-write`), so the `sandbox/mode` event
-     * alone can no longer distinguish them — this event is the durable mode
-     * carrier. `sandbox/mode` is still appended for sandbox enforcement when
-     * the target sandbox actually differs from the current one.
-     */
-    'plan-build/mode': {
-      mode: 'plan' | 'build'
-    }
-  }
-}
+/**
+ * A session's Plan/Build mode.
+ */
+export type PlanBuildMode = 'plan' | 'build'
 
 /**
  * Deployment configuration for the Plan/Build mode plugin.

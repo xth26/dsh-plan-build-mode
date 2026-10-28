@@ -5,11 +5,18 @@ import { join } from 'node:path'
 describe('cordis.patch.yml', () => {
   const patch = readFileSync(join(process.cwd(), 'cordis.patch.yml'), 'utf8')
 
-  it('is a pure insert without a config block (plugin-market hot enable)', () => {
+  it('inserts the plugin row and extends the official permission presets', () => {
     expect(patch).toContain('- insert:')
     expect(patch).toContain('id: plan-build-mode')
     expect(patch).toContain("name: '@xth26/dsh-plan-build-mode'")
-    expect(patch).not.toMatch(/^\s*config:/m)
+    // The plugin row itself carries no config (hot-mountable pure insert).
+    expect(patch).not.toMatch(/- id: plan-build-mode[\s\S]*?^      config:/m)
+    // The permission override restates the shipped presets and adds the
+    // OpenCode-style modes; no `!!js` (keeps the patch statically valid).
+    expect(patch).toContain('id: permission')
+    expect(patch).toContain('oc-plan')
+    expect(patch).toContain('oc-build')
+    expect(patch).toContain('danger-full-access')
     expect(patch).not.toMatch(/!!js/)
   })
 })
