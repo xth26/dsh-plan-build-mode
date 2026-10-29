@@ -341,15 +341,21 @@ describe('permission gate (tools/pre-execute)', () => {
     expect(next).not.toHaveBeenCalled()
   })
 
-  it('fails closed to deny when an ask has no approval channel', async () => {
+  it('allows bash in Plan mode by default (sandbox is the floor), and still honors explicit ask', async () => {
     const ctx = setupCtx()
-    apply(ctx as any, { modes: { plan: { bash: 'ask' } } })
+    apply(ctx as any, {})
     const listener = getToolsListener(ctx)!
     const agent = { session: makeSession(), store: PLAN_STORE }
     const next = vi.fn(async () => ({ kind: 'allow' } as PreToolDecision))
     const result = await listener(makeToolExecution('bash', agent, { command: 'ls' }), next)
-    expect(result).toMatchObject({ kind: 'deny' })
-    expect((result as any).reason).toContain('no approval channel')
+    expect(next).toHaveBeenCalled()
+
+    const ctx2 = setupCtx()
+    apply(ctx2 as any, { modes: { plan: { bash: 'ask' } } })
+    const listener2 = getToolsListener(ctx2)!
+    const result2 = await listener2(makeToolExecution('bash', agent, { command: 'ls' }), next)
+    expect(result2).toMatchObject({ kind: 'deny' })
+    expect((result2 as any).reason).toContain('no approval channel')
   })
 })
 
@@ -360,7 +366,7 @@ describe('system prompt text', () => {
     const text = getSystemPromptText(ctx)({ agent: { session: makeSession(), store: PLAN_STORE } } as any)
     expect(text).toContain('You are in OpenCode Plan Mode')
     expect(text).toContain('python -B')
-    expect(text).toContain('read data files')
+    expect(text).toContain('workspace-write sandbox')
   })
 
   it('renders Build-mode guidance', () => {

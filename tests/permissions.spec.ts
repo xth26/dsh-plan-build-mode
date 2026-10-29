@@ -320,8 +320,10 @@ describe('defaults', () => {
     expect(DEFAULT_EXTERNAL_DEFAULT).toBe('allow')
   })
 
-  it('denies write tools in Plan mode by default', () => {
+  it('denies write tools in Plan mode by default and leaves commands to the sandbox', () => {
     expect(DEFAULT_PLAN_OVERRIDES.edit).toBe('deny')
+    expect(DEFAULT_PLAN_OVERRIDES.bash).toBeUndefined()
+    expect(DEFAULT_PLAN_OVERRIDES.pwsh).toBeUndefined()
   })
 
   it('exports scalar default actions for every category', () => {

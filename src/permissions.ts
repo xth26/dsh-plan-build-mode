@@ -72,11 +72,11 @@ export const DEFAULT_PERMISSION: Record<ToolCategory, PermissionValue> = {
   websearch: DEFAULT_ACTIONS.websearch,
 }
 
-/** Default Plan-mode overrides (write tools denied, commands ask). */
+/** Default Plan-mode overrides (write tools denied; commands follow the
+ * sandbox — OpenCode's plan mode allows read-only commands without a prompt,
+ * and the workspace-write sandbox remains the hard floor for file effects). */
 export const DEFAULT_PLAN_OVERRIDES: Partial<Record<ToolCategory, PermissionValue>> = {
   edit: 'deny',
-  bash: 'ask',
-  pwsh: 'ask',
 }
 
 /**
