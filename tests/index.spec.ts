@@ -367,6 +367,8 @@ describe('system prompt text', () => {
     expect(text).toContain('You are in OpenCode Plan Mode')
     expect(text).toContain('python -B')
     expect(text).toContain('workspace-write sandbox')
+    expect(text).toContain('THE DELIVERABLE OF PLAN MODE IS A WRITTEN PLAN')
+    expect(text).toContain('Do NOT use ask-user-questions')
   })
 
   it('renders Build-mode guidance', () => {
