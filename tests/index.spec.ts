@@ -357,6 +357,34 @@ describe('permission gate (tools/pre-execute)', () => {
     expect(result2).toMatchObject({ kind: 'deny' })
     expect((result2 as any).reason).toContain('no approval channel')
   })
+
+  it('denies Plan-mode commands that look like file writes (sandbox cannot back the gate)', async () => {
+    const ctx = setupCtx()
+    apply(ctx as any, {})
+    const listener = getToolsListener(ctx)!
+    const agent = { session: makeSession(), store: PLAN_STORE }
+    const next = vi.fn(async () => ({ kind: 'allow' } as PreToolDecision))
+    const writes = [
+      'echo hi > out.txt',
+      'python - <<\'PY\'\nopen("a.py","w").write("x")\nPY',
+      'Set-Content out.txt "x"',
+      'python fix.py > result.log 2>&1',
+    ]
+    for (const command of writes) {
+      const result = await listener(makeToolExecution('bash', agent, { command }), next)
+      expect(result).toMatchObject({ kind: 'deny' })
+      expect((result as any).reason).toContain('forbidden in Plan Mode')
+    }
+    // Read-only commands stay free.
+    for (const command of ['python -c "print(open(\'a.py\').read())"', 'git log --oneline', 'dir']) {
+      const result = await listener(makeToolExecution('bash', agent, { command }), next)
+      expect(next).toHaveBeenCalled()
+    }
+    // In Build mode the same write command flows through.
+    const buildAgent = { session: makeSession(), store: BUILD_STORE }
+    const result = await listener(makeToolExecution('bash', buildAgent, { command: 'echo hi > out.txt' }), next)
+    expect(next).toHaveBeenCalled()
+  })
 })
 
 describe('system prompt text', () => {
@@ -366,7 +394,6 @@ describe('system prompt text', () => {
     const text = getSystemPromptText(ctx)({ agent: { session: makeSession(), store: PLAN_STORE } } as any)
     expect(text).toContain('You are in OpenCode Plan Mode')
     expect(text).toContain('python -B')
-    expect(text).toContain('workspace-write sandbox')
     expect(text).toContain('THE DELIVERABLE OF PLAN MODE IS A WRITTEN PLAN')
     expect(text).toContain('Do NOT use ask-user-questions')
   })

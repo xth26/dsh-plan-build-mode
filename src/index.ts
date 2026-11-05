@@ -52,6 +52,7 @@ import {
   DEFAULT_PLAN_OVERRIDES,
   extractCommand,
   extractTargets,
+  commandLooksLikeWrite,
   externalDenyReason,
   externalWriteEscalationReason,
   gateDecision,
@@ -187,7 +188,7 @@ export function apply(ctx: Context, config: PlanBuildModeConfig = {}): void {
           const agent = (context as { agent?: { session: Session } }).agent
           if (agent === undefined) return ''
           return modeOf(ctx, agent.session, storeOf(agent, modeStore)) === 'plan'
-            ? 'You are in OpenCode Plan Mode. You are READ-ONLY: you may not modify files except under the configured plans directory. You may read files anywhere (including outside the workspace), search code, browse directories, and run commands without confirmation — commands run under the workspace-write sandbox, which is the hard floor: any file or system change outside the plans directory is blocked by the sandbox, not by prompts. Read-only analysis via command-line snippets (for example, python -B -c "...") is encouraged; commands whose purpose is to modify files will fail in the sandbox, so leave them for Build Mode.\n\nTHE DELIVERABLE OF PLAN MODE IS A WRITTEN PLAN, not a question about whether to proceed. Before doing anything else at the end of your investigation, write the complete plan as a markdown file under the configured plans directory (you may create it in Plan Mode). The plan must contain: the problem statement, root cause, every concrete change (file, location, before → after), verification steps, and anything you deliberately leave out. Then present the plan summary to the user in your reply and STOP — let the user review it and decide when to switch to Build Mode (via /plan-build, the permission dropdown, or their reply). Do NOT use ask-user-questions or any other tool to ask "should I exit Plan Mode / apply the fix" — that decision belongs to the user after they read the plan. Switch to Build Mode yourself only when the user has explicitly approved this plan in the conversation.'
+            ? 'You are in OpenCode Plan Mode. You are READ-ONLY: you may not modify files except under the configured plans directory. You may read files anywhere (including outside the workspace), search code, browse directories, and run read-only commands without confirmation — command-line analysis (for example, python -B -c "..." to read data, git log, running test suites) is encouraged. Commands whose text looks like a file write (shell redirects like > file, Set-Content/New-Item, or interpreter calls like open(..., "w") / write_text) are BLOCKED in Plan Mode — do not try to modify files through shell commands, scripts, or heredocs either; the gate matches the command text. If a verification requires writing files, leave it for Build Mode.\n\nTHE DELIVERABLE OF PLAN MODE IS A WRITTEN PLAN, not a question about whether to proceed. Before doing anything else at the end of your investigation, write the complete plan as a markdown file under the configured plans directory (you may create it in Plan Mode). The plan must contain: the problem statement, root cause, every concrete change (file, location, before → after), verification steps, and anything you deliberately leave out. Then present the plan summary to the user in your reply and STOP — let the user review it and decide when to switch to Build Mode (via /plan-build, the permission dropdown, or their reply). Do NOT use ask-user-questions or any other tool to ask "should I exit Plan Mode / apply the fix" — that decision belongs to the user after they read the plan. Switch to Build Mode yourself only when the user has explicitly approved this plan in the conversation.'
             : 'You are in OpenCode Build Mode. You may edit files, run commands, and execute the approved plan. Make minimal changes, run tests/verification after changes, and ask for confirmation before destructive git operations or system-wide changes. Run /plan-build (or /plan-build switch plan) to return to Plan Mode when you need to re-plan. Reading files outside the session workspace is allowed; writing outside the workspace requires sandbox escalation (retry with sandbox_permissions + justification).'
         },
       }))
@@ -388,6 +389,22 @@ async function evaluateExecution(
   const command = extractCommand(exec.name, exec.arguments)
   const matchSubjects = matchSubjectsFor(exec.name, targets, workspaceRoot, command)
   const effectiveSandboxMode = effectiveSandbox(ctx, session)
+
+  // Plan-mode command write guard: the workspace-write sandbox deliberately
+  // permits in-workspace writes, so it cannot back the plan gate for
+  // bash/pwsh. A command whose text looks like a file write is denied the
+  // same way a write tool would be (plans-directory commands stay free).
+  if (
+    mode === 'plan' &&
+    (category === 'bash' || category === 'pwsh') &&
+    command !== undefined &&
+    commandLooksLikeWrite(command)
+  ) {
+    return {
+      kind: 'deny',
+      reason: `${planWriteDenyReason(exec.name)} (the command text matches a file-write pattern: redirects, Set-Content/New-Item, or interpreter write calls are not available in Plan Mode. Run read-only commands freely, or switch to Build Mode to modify files.)`,
+    }
+  }
 
   const decision: Decision = gateDecision({
     mode,

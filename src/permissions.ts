@@ -185,6 +185,29 @@ export function extractCommand(name: string, args: unknown): string | undefined 
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
+/**
+ * Heuristic: does this command text plausibly write files? Plan mode needs it
+ * because the workspace-write sandbox deliberately permits in-workspace
+ * writes — the sandbox cannot back the plan gate for commands. Covers shell
+ * redirection and the common Python/Node/PowerShell write idioms. Runs only
+ * in Plan mode; Build mode never consults this.
+ */
+export function commandLooksLikeWrite(command: string): boolean {
+  const c = command
+  // Shell redirection / append: `>`, `>>`, `n>`, `n>>` followed by a target,
+  // but not fd dups (`2>&1`) and not comparisons like `2 > 1` in code… best
+  // effort: require the target to start with a non-digit word character and
+  // the operator to follow whitespace or a statement boundary.
+  if (/(^|[\s;(])\d?>>?\s*[^\s\d&|;][^\n]*$/.test(c) && !/=>|>=|>>=|<<=/.test(c)) return true
+  // PowerShell write cmdlets.
+  if (/\b(?:Set-Content|Add-Content|Out-File|New-Item|Export-Csv|Export-Clixml|Tee-Object|Copy-Item|Move-Item|Remove-Item|Rename-Item)\b/i.test(c)) return true
+  // Interpreter write idioms (also catches heredoc-fed python - <<'PY' bodies).
+  if (/\bopen\s*\([^)]*['"][wa]\+?['"]|write_text\s*\(|write_bytes\s*\(|writeFileSync\s*\(|fs\.writeFile\s*\(|\.write\s*\(\s*['"`]/i.test(c)) return true
+  // Creator utilities.
+  if (/\b(?:touch|tee)\b/.test(c)) return true
+  return false
+}
+
 /** Normalize a path/pattern for cross-platform wildcard matching (forward slashes). */
 export function normalizePath(p: string): string {
   return p.replace(/\\/g, '/')
