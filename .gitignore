@@ -5,3 +5,5 @@ lib/
 .pnpm-store/
 .dsh/
 tsconfig.tsbuildinfo
+
+.vitest-cache/
