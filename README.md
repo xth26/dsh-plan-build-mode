@@ -25,6 +25,9 @@ DSH plugin market (hot mount) without a restart.
 
 | Plugin version | DSH version | Notes |
 |---|---|---|
+| `0.6.3+` | `>= 0.2.1-rc.3` | Mode derives from the official `permissionPresets` service (`oc-plan` preset = Plan mode; any other preset = Build). The bundle patch overrides the shared `permission` row to add the `oc-plan` / `oc-build` presets to the stock dropdown. `oc-permission` command (renamed from `permission` to avoid the name collision). Mode state persists in the plugin-owned `storageDomain` KV domain (in-memory fallback). |
+| `0.6.6+` | `>= 0.2.1-rc.3` | Plan-mode write guard for bash/pwsh: commands whose text matches write idioms (redirects, `Set-Content`, `open(...,"w")`, `setx`, `reg add`, git push/commit, package installs, network writes, kill, …) are denied — the workspace-write sandbox cannot back the plan gate for commands. |
+| `0.6.9+` | `>= 0.2.1-rc.3` | OpenCode-style shell scanner: compound commands are split into subcommands (quote/heredoc-aware) and every subcommand is checked; dynamic evaluation (`$()`, backticks, `${…}`, unquoted `$var`), unbalanced quotes and unterminated heredocs fail closed. |
 | `0.5.1` | `>= 0.1.5-rc.1` | Bundle patch is now a pure insert; OpenCode-aligned defaults are baked into the plugin code so the plugin can be enabled directly from the plugin market without a restart. |
 | `0.5.x` | `>= 0.1.5-rc.1` | Adds the OpenCode permission gate and `/permission`; mode is carried by the `plan-build/mode` session event (legacy sessions are inferred from `sandbox/mode`). |
 | `0.4.x` | `>= 0.1.5-rc.1` | Uses `session.snapshotEvents()`; DSH 0.1.5 removed the `session.events` snapshot getter. |
@@ -73,6 +76,13 @@ Or, if you prefer to keep separate profiles but want to share only the session s
 ```
 
 Note: sharing session directories across profiles requires both profiles to mount compatible service bundles; otherwise event interpretation may differ.
+
+### Client mode label
+
+The package ships a web client module (`./client`) that registers a resident
+mode label in the composer dock: **Plan 只读模式** (gray dot) in Plan mode,
+**Build 模式** (blue dot) in Build mode. It reads the live permission
+projection, so it follows dropdown switches without reloads of the session.
 
 ## Local development / link
 
@@ -139,9 +149,15 @@ dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
 | `/plan-build switch plan` | Enter Plan mode (read-only by policy) |
 | `/plan-build switch build` | Enter Build mode (writable) |
 | `/plan-build switch` | Same as `/plan-build`; toggles between modes |
-| `/permission status` | Show the external-path default, rules, and the session allowlist |
-| `/permission allow <pattern>` | Add a pattern to this session's allowlist (OpenCode "always") |
-| `/permission deny <pattern>` | Remove a pattern from this session's allowlist |
+| `/oc-permission status` | Show the external-path default, rules, and the session allowlist |
+| `/oc-permission allow <pattern>` | Add a pattern to this session's allowlist (OpenCode "always") |
+| `/oc-permission deny <pattern>` | Remove a pattern from this session's allowlist |
+
+When the official `permissionPresets` service is mounted (the default in DSH
+desktop profiles), mode switches go through `presets.set()` — the stock
+permission dropdown shows `oc-plan` / `oc-build` plus the shipped presets, and
+picking any preset is always an exit from Plan mode. The plugin-owned mode
+store is only the fallback for assemblies without that service.
 
 ## Configuration
 
@@ -200,17 +216,55 @@ OpenCode: most categories `allow`; `.env*` reads are denied (`.env.example`
 allowed back).
 
 Plan mode overrides (unless overridden by `modes.plan` or `denyWriteTools:
-false`): `edit: deny`, `bash: ask`, `pwsh: ask` — mirroring OpenCode's plan
-agent defaults. `modes.plan` / `modes.build` override the global permission for
-that mode, like OpenCode's agent-specific overrides.
+false`): `edit: deny` — mirroring OpenCode's plan agent defaults.
+`modes.plan` / `modes.build` override the global permission for that mode,
+like OpenCode's agent-specific overrides.
 
 ```yaml
 modes:
   plan:
-    bash: deny   # instead of the default ask
+    bash: deny   # instead of the default (scanner-gated allow)
+    otherTools: deny   # default; 'allow' lifts the deny on uncategorized state-changing tools
   build:
     read: allow
 ```
+
+### Plan mode: shell scanner
+
+Plan-mode `bash` / `pwsh` commands are scanned like OpenCode's shell scanner:
+
+1. The command text is split into **subcommands** on `&&`, `||`, `;`, `|`, `&`
+   and newlines — quote- and heredoc-aware. `git status && rm -rf src` is two
+   commands, and the `rm` is checked even though the text starts with a safe
+   prefix.
+2. Every subcommand is checked against write heuristics: redirects (`> file`,
+   `>>`), PowerShell write cmdlets (`Set-Content`, `New-Item`, …),
+   interpreter write idioms (`open(...,"w")`, `write_text`, `writeFileSync`,
+   including inside heredoc-fed script bodies), file mutations (`rm`, `mv`,
+   `cp`, `mkdir`, …), git state changes (`git push|commit|reset|…`), package
+   installs/publishes (`npm install`, `pip install`, …), network writes
+   (`curl -X POST`, `wget -O`, `scp`), process/permission mutation (`kill`,
+   `chmod`, `icacls`, …), and persistent system state (`setx`,
+   `SetEnvironmentVariable`, `reg add`, `schtasks`, `sc config`).
+3. **Fail closed**: anything the scanner cannot statically analyze — command
+   substitution `$(…)`, backticks, `${…}` or unquoted `$var` expansion
+   (bash), `$(…)` subexpressions and backtick escapes (PowerShell),
+   unbalanced quotes, unterminated heredocs — is rejected with a
+   `plan-mode scanner error` instead of executed.
+
+Read-only compounds (`git status && ls`, `cat a | grep x | head`, `git diff`
+newlines) stay free. This makes Plan mode deterministic — stronger than stock
+Claude Code (prompt-only) — while staying below a full parser like OpenCode's
+`unbash`-based scanner in theoretical precision.
+
+### Uncategorized tools
+
+Known state-changing tools with no permission category are denied in Plan
+mode unless `modes.plan.otherTools: 'allow'`: `compress`, `interrupt_agent`,
+`send_message`, `job_kill`, `schedule_create`, `schedule_edit`,
+`office_open/edit/save/close`, the `browser_*` automation family, and
+`create_goal` / `update_goal`. Unknown/MCP tools stay ungated (the sandbox
+remains the floor).
 
 ### Plans carve-out
 

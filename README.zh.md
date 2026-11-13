@@ -22,6 +22,9 @@ OpenCode 风格的 Plan / Build 硬权限模型插件（DeepSeek Harness）。
 
 | 插件版本 | DSH 版本 | 说明 |
 |---|---|---|
+| `0.6.3+` | `>= 0.2.1-rc.3` | 模式改由官方 `permissionPresets` 服务承载（`oc-plan` 预设 = Plan 模式；其它预设 = Build）。bundle patch 覆盖共享的 `permission` 行，把 `oc-plan` / `oc-build` 预设加进原生下拉。命令改名 `/oc-permission`（原 `/permission`，避免与官方命令重名）。模式状态持久化在插件专属的 `storageDomain` KV 域（内存兜底）。 |
+| `0.6.6+` | `>= 0.2.1-rc.3` | Plan 模式 bash/pwsh 写守卫：命中写习语（重定向、`Set-Content`、`open(...,"w")`、`setx`、`reg add`、git push/commit、包安装、网络写、kill 等）的命令直接拒绝——workspace-write 沙箱无法为命令兜底 plan 门禁。 |
+| `0.6.9+` | `>= 0.2.1-rc.3` | OpenCode 风格 shell scanner：复合命令拆成子命令（引号/heredoc 感知）逐条检查；动态求值（`$()`、反引号、`${…}`、未加引号的 `$var`）、引号不闭合、heredoc 未终止一律 fail closed。 |
 | `0.5.1` | `>= 0.1.5-rc.1` | bundle patch 改为纯 insert；OpenCode 对齐默认值内置到插件代码，插件市场可直接启用，无需重启。 |
 | `0.5.x` | `>= 0.1.5-rc.1` | 新增 OpenCode 权限门禁与 `/permission`；模式由 `plan-build/mode` 会话事件承载（旧会话从 `sandbox/mode` 推断）。 |
 | `0.4.x` | `>= 0.1.5-rc.1` | 使用 `session.snapshotEvents()`；DSH 0.1.5 移除了 `session.events` 快照 getter。 |
@@ -44,9 +47,9 @@ dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode
 
 ## 让 Web 和 TUI 共享同一个 Plan/Build 模式
 
-Plan/Build 模式状态存在会话事件日志里（插件专属的 `plan-build/mode` 事件，
-以及用于沙箱执行的 `sandbox/mode` 事件）。`dsh web` 和 `dsh --profile <名称>`
-只有在共用同一个 profile、同一个 session ID 时，才会读写同一个会话事件流。
+Plan/Build 模式状态持久化在插件专属的 `storageDomain` KV 域（进程内 SQLite，
+无持久层时内存兜底）。同一 profile 下多个入口共享同一插件实例，因此模式切换
+天然同步；`permissionPresets` 服务挂载时以官方预设为权威来源。
 
 - **同一个 profile**：比如 `dsh web --profile web` 和 `dsh --profile web` 启动的两个入口，会共享 session 事件，因此模式切换会同步生效。
 - **不同 profile**：默认 `web` 和 `dsh-tui` 是两个独立 profile，会话目录也分开。在一处切换不会影响另一处。
@@ -129,9 +132,13 @@ dsh plugin --profile dsh-tui add @xth26/dsh-plan-build-mode@latest
 | `/plan-build switch plan` | 进入 Plan 模式（策略只读） |
 | `/plan-build switch build` | 进入 Build 模式（可写） |
 | `/plan-build switch` | 同 `/plan-build`，切换当前模式 |
-| `/permission status` | 显示外部路径默认值、规则与本次会话的 allowlist |
-| `/permission allow <pattern>` | 把模式加入本次会话 allowlist（OpenCode 的 “always”） |
-| `/permission deny <pattern>` | 从本次会话 allowlist 移除该模式 |
+| `/oc-permission status` | 显示外部路径默认值、规则与本次会话的 allowlist |
+| `/oc-permission allow <pattern>` | 把模式加入本次会话 allowlist（OpenCode 的 “always”） |
+| `/oc-permission deny <pattern>` | 从本次会话 allowlist 移除该模式 |
+
+当官方 `permissionPresets` 服务挂载时（DSH 桌面 profile 的默认形态），模式切换
+走 `presets.set()`——原生权限下拉会出现 `oc-plan` / `oc-build` 预设，选择任何
+预设都等于退出 Plan 模式。插件自有的模式 store 只作为没有该服务的组合的后备。
 
 ## 配置
 
@@ -186,16 +193,49 @@ permission:
 OpenCode：大多数类别 `allow`；`.env*` 读取被拒绝（`.env.example` 恢复为允许）。
 
 Plan 模式覆盖默认值（除非被 `modes.plan` 或 `denyWriteTools: false` 覆盖）：
-`edit: deny`、`bash: ask`、`pwsh: ask`——对应 OpenCode plan agent 的默认值。
+`edit: deny`——对应 OpenCode plan agent 的默认值。
 `modes.plan` / `modes.build` 按模式覆盖全局权限，类似 OpenCode 的 agent 级覆盖。
 
 ```yaml
 modes:
   plan:
-    bash: deny   # 替代默认的 ask
+    bash: deny   # 替代默认值（scanner 门控放行）
+    otherTools: deny   # 默认；设为 'allow' 可解除对未归类状态变更工具的拒绝
   build:
     read: allow
 ```
+
+### Plan 模式：shell scanner
+
+Plan 模式的 `bash` / `pwsh` 命令按 OpenCode shell scanner 的方式扫描：
+
+1. 命令文本在 `&&`、`||`、`;`、`|`、`&` 和换行处拆成**子命令**——引号与
+   heredoc 感知。`git status && rm -rf src` 是两条命令，即使文本以安全前缀
+   开头，`rm` 也会被检查。
+2. 每条子命令过写习语判定：重定向（`> file`、`>>`）、PowerShell 写命令
+   （`Set-Content`、`New-Item` 等）、解释器写法（`open(...,"w")`、
+   `write_text`、`writeFileSync`，含 heredoc 喂入的脚本体内）、文件变更
+   （`rm`、`mv`、`cp`、`mkdir` 等）、git 状态变更（`git push|commit|reset` 等）、
+   包安装/发布（`npm install`、`pip install` 等）、网络写（`curl -X POST`、
+   `wget -O`、`scp`）、进程/权限变更（`kill`、`chmod`、`icacls` 等）、
+   持久系统状态（`setx`、`SetEnvironmentVariable`、`reg add`、`schtasks`、
+   `sc config`）。
+3. **Fail closed**：任何无法静态分析的结构——命令替换 `$(…)`、反引号、
+   `${…}` 或未加引号的 `$var` 展开（bash）、`$(…)` 子表达式与反引号转义
+   （PowerShell）、引号不闭合、heredoc 未终止——都以
+   `plan-mode scanner error` 拒绝，不会执行。
+
+只读复合命令（`git status && ls`、`cat a | grep x | head`、`git diff` 换行）
+照常放行。这让 Plan 模式成为确定性门禁——强于原生 Claude Code（仅提示词），
+理论上精度略低于 OpenCode 基于 `unbash` 的完整 parser。
+
+### 未归类工具
+
+已知的无权限类别状态变更工具在 Plan 模式默认拒绝（`modes.plan.otherTools:
+'allow'` 可解除）：`compress`、`interrupt_agent`、`send_message`、`job_kill`、
+`schedule_create`、`schedule_edit`、`office_open/edit/save/close`、
+`browser_*` 自动化全家、`create_goal` / `update_goal`。未知/MCP 工具不设门
+（沙箱仍是底线）。
 
 ### Plans 目录例外
 
@@ -210,7 +250,7 @@ modes:
 - **写入**工作区之外由沙箱决定。在 `workspace-write` 下无法放行，因此插件不会
   弹审批（那也会在沙箱层失败），而是直接拒绝并给出升级提示——用
   `sandbox_permissions` + `justification` 重试同一个工具。
-- `/permission allow <pattern>` 会加入一个会话级 allowlist 条目（OpenCode
+- `/oc-permission allow <pattern>` 会加入一个会话级 allowlist 条目（OpenCode
   “always”），仅在该会话内存中保留。
 
 ## Plan 模式：命令行 Python 做数据检查
@@ -239,8 +279,15 @@ pytest -p no:cacheprovider -q tests/test_sanity.py
 5. 再次输入 `/plan-build`，应提示进入 Build 模式。
 6. 让 agent 对 `src/x.ts` 调用 `write`，应允许执行。
 7. 让 agent 读取工作区之外的文件，应无需提示直接放行（默认 `external_directory: allow`）。
-8. 输入 `/permission status` 查看门禁状态；可尝试 `/permission allow ~/projects/**` 添加会话 allowlist。
+8. 输入 `/oc-permission status` 查看门禁状态；可尝试 `/oc-permission allow ~/projects/**` 添加会话 allowlist。
 9. 输入 `/plan-build status`，可只查看当前模式而不切换。
+10. Plan 模式下让 agent 跑 `git status && rm -rf src`，应被拒绝（scanner 拆出写子命令）；跑 `echo "$(/tmp/evil)"`，应被拒绝（fail closed）。
+
+## 客户端模式标签
+
+包附带 web 客户端模块（`./client`），在输入框 dock 注册常驻模式标签：
+Plan 模式显示 **Plan 只读模式**（灰点），Build 模式显示 **Build 模式**（蓝点）。
+标签读取实时权限投影，跟随下拉切换即时变化。
 
 ## 许可证
 
