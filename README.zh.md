@@ -234,7 +234,7 @@ Plan 模式的 `bash` / `pwsh` 命令按 OpenCode shell scanner 的方式扫描�
 已知的无权限类别状态变更工具在 Plan 模式默认拒绝（`modes.plan.otherTools:
 'allow'` 可解除）：`compress`、`interrupt_agent`、`send_message`、`job_kill`、
 `schedule_create`、`schedule_edit`、`office_open/edit/save/close`、
-`browser_*` 自动化全家、`create_goal` / `update_goal`。未知/MCP 工具不设门
+交互式 `browser_*` 成员（`click/type/key/drag` 等；`browser_open`/`browser_read` 等只读浏览放行）、`create_goal` / `update_goal`。未知/MCP 工具不设门
 （沙箱仍是底线）。
 
 ### Plans 目录例外

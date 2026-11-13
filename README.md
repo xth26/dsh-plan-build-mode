@@ -262,7 +262,7 @@ Claude Code (prompt-only) — while staying below a full parser like OpenCode's
 Known state-changing tools with no permission category are denied in Plan
 mode unless `modes.plan.otherTools: 'allow'`: `compress`, `interrupt_agent`,
 `send_message`, `job_kill`, `schedule_create`, `schedule_edit`,
-`office_open/edit/save/close`, the `browser_*` automation family, and
+`office_open/edit/save/close`, the interactive `browser_*` members (`click/type/key/drag/...` — read-only browsing such as `browser_open`/`browser_read` stays allowed), and
 `create_goal` / `update_goal`. Unknown/MCP tools stay ungated (the sandbox
 remains the floor).
 
