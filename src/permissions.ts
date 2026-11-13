@@ -159,11 +159,15 @@ export const PLAN_OTHER_DENY_TOOLS = [
   'schedule_create', 'schedule_edit',
   // Office automation (edits open documents).
   'office_open', 'office_edit', 'office_save', 'office_close',
-  // Sidecar browser (drives a real Chrome).
-  'browser_open', 'browser_click', 'browser_type', 'browser_key', 'browser_drag',
-  'browser_check', 'browser_select', 'browser_upload', 'browser_nav', 'browser_cookie',
-  'browser_clipboard', 'browser_login', 'browser_dialog', 'browser_do', 'browser_ask',
-  'browser_review', 'browser_review_verdict', 'browser_media', 'browser_download',
+  // Sidecar browser — interactive/mutating members only. Read-only browsing
+  // (browser_open/view/read/find/extract/scroll/hover/state/console/network/
+  // failed/failed_requests/shot/grab/pdf/tabs/wait/prepare/mode/downloads/
+  // look/resume/evaluate) stays ALLOWED in Plan mode: research needs it.
+  'browser_click', 'browser_type', 'browser_key', 'browser_drag',
+  'browser_check', 'browser_select', 'browser_upload', 'browser_nav',
+  'browser_cookie', 'browser_clipboard', 'browser_login', 'browser_dialog',
+  'browser_do', 'browser_ask', 'browser_review', 'browser_review_verdict',
+  'browser_media', 'browser_download',
   // User prompt / goals.
   'create_goal', 'update_goal',
 ] as const

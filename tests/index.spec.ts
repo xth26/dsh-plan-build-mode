@@ -422,6 +422,12 @@ describe('permission gate (tools/pre-execute)', () => {
     // Unknown/MCP tools stay ungated.
     const unknown = await listener(makeToolExecution('some_mcp_tool', agent, {}), next)
     expect(unknown).toMatchObject({ kind: 'allow' })
+    // Read-only browser tools stay allowed in Plan mode (research needs them).
+    for (const name of ['browser_open', 'browser_view', 'browser_read', 'browser_find', 'browser_shot']) {
+      const result = await listener(makeToolExecution(name, agent, {}), next)
+      expect(next).toHaveBeenCalled()
+      next.mockClear()
+    }
     // In Build mode the same write command flows through.
     const buildAgent = { session: makeSession(), store: BUILD_STORE }
     const result = await listener(makeToolExecution('bash', buildAgent, { command: 'echo hi > out.txt' }), next)
