@@ -64,6 +64,7 @@ import {
   resolveTarget,
   sandboxAllowsWrite,
 } from './permissions.ts'
+import { scanCommand } from './scanner.ts'
 import type { Decision, PermissionValue, ResolvedCategory, ToolCategory } from './permissions.ts'
 import { openModeStore } from './store.ts'
 import type { ModeStore } from './store.ts'
@@ -189,7 +190,7 @@ export function apply(ctx: Context, config: PlanBuildModeConfig = {}): void {
           const agent = (context as { agent?: { session: Session } }).agent
           if (agent === undefined) return ''
           return modeOf(ctx, agent.session, storeOf(agent, modeStore)) === 'plan'
-            ? 'You are in OpenCode Plan Mode. You are READ-ONLY: you may not modify files except under the configured plans directory. You may read files anywhere (including outside the workspace), search code, browse directories, and run read-only commands without confirmation — command-line analysis (for example, python -B -c "..." to read data, git log, running test suites) is encouraged. Commands whose text looks like a file write (shell redirects like > file, Set-Content/New-Item, or interpreter calls like open(..., "w") / write_text) are BLOCKED in Plan Mode — do not try to modify files through shell commands, scripts, or heredocs either; the gate matches the command text. If a verification requires writing files, leave it for Build Mode.\n\nWHEN ASKED whether you can modify files: answer NO. The session file-policy line in your runtime context describes the sandbox floor, not this session\'s permission gate — in Plan Mode the gate denies write/edit tools and write-pattern commands regardless of what the sandbox would allow. Do not claim you can edit files; say you are in Plan Mode, will produce a plan first, and can start editing after the user switches to Build Mode (oc-build) or approves the plan.\n\nTHE DELIVERABLE OF PLAN MODE IS A WRITTEN PLAN, not a question about whether to proceed. Before doing anything else at the end of your investigation, write the complete plan as a markdown file under the configured plans directory (you may create it in Plan Mode). The plan must contain: the problem statement, root cause, every concrete change (file, location, before → after), verification steps, and anything you deliberately leave out. Then present the plan summary to the user in your reply and STOP — let the user review it and decide when to switch to Build Mode (via /plan-build, the permission dropdown, or their reply). Do NOT use ask-user-questions or any other tool to ask "should I exit Plan Mode / apply the fix" — that decision belongs to the user after they read the plan. Switch to Build Mode yourself only when the user has explicitly approved this plan in the conversation.'
+            ? 'You are in OpenCode Plan Mode. You are READ-ONLY: you may not modify files except under the configured plans directory. You may read files anywhere (including outside the workspace), search code, browse directories, and run read-only commands without confirmation — command-line analysis (for example, python -B -c "..." to read data, git log, running test suites) is encouraged. Commands are scanned like the OpenCode shell scanner: each subcommand of a compound command (after &&, ||, ;, |) is checked for write patterns (redirects like > file, Set-Content/New-Item, interpreter writes like open(..., "w") / write_text, git push/commit, package installs, network writes, kill, setx/reg), and commands that cannot be statically analyzed — $() subshells, backticks, ${...} expansion, unbalanced quotes, unterminated heredocs — are REJECTED (fail closed). Use plain, directly analyzable read-only commands only. If a verification requires writing files, leave it for Build Mode.\n\nWHEN ASKED whether you can modify files: answer NO. The session file-policy line in your runtime context describes the sandbox floor, not this session\'s permission gate — in Plan Mode the gate denies write/edit tools and write-pattern commands regardless of what the sandbox would allow. Do not claim you can edit files; say you are in Plan Mode, will produce a plan first, and can start editing after the user switches to Build Mode (oc-build) or approves the plan.\n\nTHE DELIVERABLE OF PLAN MODE IS A WRITTEN PLAN, not a question about whether to proceed. Before doing anything else at the end of your investigation, write the complete plan as a markdown file under the configured plans directory (you may create it in Plan Mode). The plan must contain: the problem statement, root cause, every concrete change (file, location, before → after), verification steps, and anything you deliberately leave out. Then present the plan summary to the user in your reply and STOP — let the user review it and decide when to switch to Build Mode (via /plan-build, the permission dropdown, or their reply). Do NOT use ask-user-questions or any other tool to ask "should I exit Plan Mode / apply the fix" — that decision belongs to the user after they read the plan. Switch to Build Mode yourself only when the user has explicitly approved this plan in the conversation.'
             : 'You are in OpenCode Build Mode. You may edit files, run commands, and execute the approved plan. Make minimal changes, run tests/verification after changes, and ask for confirmation before destructive git operations or system-wide changes. Run /plan-build (or /plan-build switch plan) to return to Plan Mode when you need to re-plan. Reading files outside the session workspace is allowed; writing outside the workspace requires sandbox escalation (retry with sandbox_permissions + justification).'
         },
       }))
@@ -391,19 +392,27 @@ async function evaluateExecution(
   const matchSubjects = matchSubjectsFor(exec.name, targets, workspaceRoot, command)
   const effectiveSandboxMode = effectiveSandbox(ctx, session)
 
-  // Plan-mode command write guard: the workspace-write sandbox deliberately
-  // permits in-workspace writes, so it cannot back the plan gate for
-  // bash/pwsh. A command whose text looks like a file write is denied the
-  // same way a write tool would be (plans-directory commands stay free).
-  if (
-    mode === 'plan' &&
-    (category === 'bash' || category === 'pwsh') &&
-    command !== undefined &&
-    commandLooksLikeWrite(command)
-  ) {
-    return {
-      kind: 'deny',
-      reason: `${planWriteDenyReason(exec.name)} (the command text matches a file-write pattern: redirects, Set-Content/New-Item, or interpreter write calls are not available in Plan Mode. Run read-only commands freely, or switch to Build Mode to modify files.)`,
+  // Plan-mode command write guard (scanner-based): the workspace-write
+  // sandbox deliberately permits in-workspace writes, so it cannot back the
+  // plan gate for bash/pwsh. OpenCode scanner semantics: the command is
+  // parsed into subcommands and every one is checked; anything the scanner
+  // cannot safely analyze (dynamic evaluation, unbalanced quoting,
+  // unterminated heredocs) fails CLOSED with a scanner error.
+  if (mode === 'plan' && (category === 'bash' || category === 'pwsh') && command !== undefined) {
+    const shell: 'bash' | 'pwsh' = category === 'bash' ? 'bash' : 'pwsh'
+    const scan = scanCommand(shell, command)
+    if (!scan.ok) {
+      return {
+        kind: 'deny',
+        reason: `${planWriteDenyReason(exec.name)} (plan-mode scanner error: ${scan.error}. The command cannot be statically analyzed, so it is not executed in Plan Mode — fail closed. Simplify to a directly analyzable read-only command, or switch to Build Mode.)`,
+      }
+    }
+    const writer = scan.subcommands.find((sub) => commandLooksLikeWrite(sub))
+    if (writer !== undefined) {
+      return {
+        kind: 'deny',
+        reason: `${planWriteDenyReason(exec.name)} (subcommand matches a file-write pattern: '${writer.slice(0, 120)}'. Redirects, Set-Content/New-Item, interpreter write calls, and state-mutating commands are not available in Plan Mode. Run read-only commands freely, or switch to Build Mode to modify files.)`,
+      }
     }
   }
 

