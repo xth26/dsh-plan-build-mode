@@ -44,7 +44,10 @@ export interface ExternalDirectoryConfig {
 
 /** Per-mode permission overrides, applied over the global `permission`. */
 export interface ModePermissionConfig {
-  plan?: Partial<Record<ToolCategory, PermissionValue>>
+  plan?: Partial<Record<ToolCategory, PermissionValue>> & {
+    /** `'allow'` lifts the Plan-mode deny on known uncategorized state-changing tools. */
+    otherTools?: PermissionValue
+  }
   build?: Partial<Record<ToolCategory, PermissionValue>>
 }
 
@@ -142,6 +145,33 @@ export function categoryOf(name: string): ToolCategory | undefined {
   }
 }
 
+/**
+ * Known state-changing tools with no permission category. In Plan mode these
+ * are denied by default (configurable via `modes.plan.otherTools`), because
+ * they mutate sessions, schedules, documents, browsers or remote state. Tools
+ * not on this list stay ungated: unknown/MCP tools would otherwise break
+ * every session that uses them, and the sandbox remains the floor.
+ */
+export const PLAN_OTHER_DENY_TOOLS = [
+  // Session / agent mutation.
+  'compress', 'interrupt_agent', 'send_message', 'job_kill',
+  // Scheduler.
+  'schedule_create', 'schedule_edit',
+  // Office automation (edits open documents).
+  'office_open', 'office_edit', 'office_save', 'office_close',
+  // Sidecar browser (drives a real Chrome).
+  'browser_open', 'browser_click', 'browser_type', 'browser_key', 'browser_drag',
+  'browser_check', 'browser_select', 'browser_upload', 'browser_nav', 'browser_cookie',
+  'browser_clipboard', 'browser_login', 'browser_dialog', 'browser_do', 'browser_ask',
+  'browser_review', 'browser_review_verdict', 'browser_media', 'browser_download',
+  // User prompt / goals.
+  'create_goal', 'update_goal',
+] as const
+
+export function isPlanOtherDenyTool(name: string): boolean {
+  return (PLAN_OTHER_DENY_TOOLS as readonly string[]).includes(name)
+}
+
 /** The static directory prefix of a glob pattern (`src/**\/*.ts` → `src`). */
 function patternBaseDir(pattern: string): string | undefined {
   const firstWild = pattern.search(/[*?]/)
@@ -203,8 +233,31 @@ export function commandLooksLikeWrite(command: string): boolean {
   if (/\b(?:Set-Content|Add-Content|Out-File|New-Item|Export-Csv|Export-Clixml|Tee-Object|Copy-Item|Move-Item|Remove-Item|Rename-Item)\b/i.test(c)) return true
   // Interpreter write idioms (also catches heredoc-fed python - <<'PY' bodies).
   if (/\bopen\s*\([^)]*['"][wa]\+?['"]|write_text\s*\(|write_bytes\s*\(|writeFileSync\s*\(|fs\.writeFile\s*\(|\.write\s*\(\s*['"`]/i.test(c)) return true
+  // Persistent system state: Windows env vars (registry-backed, survives the
+  // session), registry writes, scheduled tasks, service control.
+  if (/\bSetEnvironmentVariable\s*\(|\b(?:setx|reg(?:\s+(?:add|delete|import))?\b|schtasks\b|sc(?:\.exe)?\s+(?:config|create|delete|start|stop)\b)/i.test(c)) return true
   // Creator utilities.
   if (/\b(?:touch|tee)\b/.test(c)) return true
+  // File mutation commands: deletes, moves, copies, directory creation.
+  if (/^\s*(?:rm|rmdir|del|erase|mv|move|cp|copy|xcopy|robocopy|mkdir|md)\b/i.test(c)) return true
+  if (/\b(?:rm|del|mv|cp|mkdir)\s+-/.test(c)) return true
+  // Git state changes (push, commit, reset, clean, rebase, merge, checkout
+  // that moves branches, tag creation, stash drop…). Read-only git stays free.
+  if (/\bgit\s+(?:push|commit|reset|clean|rebase|merge|cherry-pick|revert|tag|stash|apply|am|bisect|filter-branch|worktree\s+add|branch\s+(?:-d|-D|--edit-description)|remote\s+(?:add|remove|set-url)|config\s+--global)\b/i.test(c)) return true
+  // Package installation and publish flows (mutate global state or remotes).
+  if (/\b(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|remove|rm|unlink|link|publish|unpublish|ci)\b/i.test(c)) return true
+  if (/\b(?:pip3?|uv|poetry|conda|cargo|gem|go)\s+(?:install|add|remove|publish|uninstall)\b/i.test(c)) return true
+  if (/\b(?:brew|apt|apt-get|choco|winget|scoop|dnf|yum)\s+(?:install|uninstall|remove|upgrade)\b/i.test(c)) return true
+  // Network writes: curl/w verbs, wget saving output, ssh/scp mutating remotes.
+  if (/\bcurl\s+(?:-\w*\s)*(?:-X\s*|\-\-request\s+)?(?:POST|PUT|PATCH|DELETE)\b/i.test(c)) return true
+  if (/\bcurl\s+(?:--upload-file|-T|--form|-F|--data(?:-\w+)?|-d)\b/i.test(c)) return true
+  if (/\bwget\b[^&|;]*(?:\s(?:-O|--output-document)\b|[^&|;]*>\s*\S)/i.test(c)) return true
+  if (/\b(?:scp|pscp)\b/i.test(c)) return true
+  // Interpreter state-mutation idioms beyond plain file writes: shutil/os
+  // copies & removals, os.environ mutation, subprocess spawning writers.
+  if (/\bshutil\.(?:copy|copytree|move|rmtree|unlink)\b|\bos\.(?:remove|unlink|rename|rmdir|makedirs)\b|\bos\.environ\s*\[/i.test(c)) return true
+  // Process / permission mutation.
+  if (/\b(?:kill|killall|taskkill|pkill|chmod|chown|icacls|takeown|attrib)\b/i.test(c)) return true
   return false
 }
 

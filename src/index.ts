@@ -56,6 +56,7 @@ import {
   externalDenyReason,
   externalWriteEscalationReason,
   gateDecision,
+  isPlanOtherDenyTool,
   matchSubjectsFor,
   noApprovalChannelReason,
   planWriteDenyReason,
@@ -403,6 +404,16 @@ async function evaluateExecution(
     return {
       kind: 'deny',
       reason: `${planWriteDenyReason(exec.name)} (the command text matches a file-write pattern: redirects, Set-Content/New-Item, or interpreter write calls are not available in Plan Mode. Run read-only commands freely, or switch to Build Mode to modify files.)`,
+    }
+  }
+
+  // Plan-mode uncategorized-tool guard: known state-changing tools (schedules,
+  // messages, office/browser automation, goals) are denied in Plan mode unless
+  // explicitly allowed via `modes.plan.otherTools`.
+  if (mode === 'plan' && category === undefined && config.modes?.plan?.otherTools !== 'allow' && isPlanOtherDenyTool(exec.name)) {
+    return {
+      kind: 'deny',
+      reason: `Tool '${exec.name}' is forbidden in Plan Mode (state-changing tool). Switch to Build Mode to use it, or set modes.plan.otherTools: 'allow' in the plugin config.`,
     }
   }
 
